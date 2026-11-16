@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}{{ bot_name }} · Kingshot gift codes{% endblock %}
+{% block content %}
+<div class="card" style="text-align:center;padding:40px 24px">
+  <img src="/static/logo.png" alt="" style="width:104px;height:104px;border-radius:50%;display:block;margin:0 auto 16px;box-shadow:var(--shadow)">
+  <h1 class="largetitle">{{ bot_name }}</h1>
+  <p class="subtitle" style="max-width:520px;margin:8px auto 0">Kingshot gift codes redeemed automatically for your whole alliance,
+    plus Bear Trap, Arena and event reminders in Discord.</p>
+  <div class="row" style="justify-content:center;margin-top:22px">
+    {% if invite_url %}<a class="btn" href="{{ invite_url }}" target="_blank" rel="noopener">➕ Add to Discord</a>{% endif %}
+    {% if configured %}<a class="btn discord" href="/auth/discord" style="padding:11px 20px;font-size:15px">Log in with Discord</a>{% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <div class="row" style="margin:0 0 12px;justify-content:space-between">
+    <h2 style="margin:0">Active gift codes</h2>
+    <span class="muted">Checked every hour</span>
+  </div>
+  {% if codes %}
+  <div class="cards">
+    {% for c in codes %}
+    <div class="stat" style="display:flex;align-items:center;gap:12px">
+      <span style="font-size:24px">🎁</span>
+      <div style="flex:1;min-width:0"><b style="font-size:18px;word-break:break-all">{{ c.code }}</b>
+        <div class="muted">found {{ c.added_at|dt }}</div></div>
+      <button type="button" class="small" data-copy="{{ c.code }}">Copy</button>
+    </div>
+    {% endfor %}
+  </div>
+  <p class="hint" style="margin-top:14px">Redeem them in game yourself, or log in and link your account so {{ bot_name }} does it for you.</p>
+  {% else %}
+  <div class="empty"><div class="big">🎁</div>No active codes right now. Check back soon.</div>
+  {% endif %}
+</div>
+{% endblock %}

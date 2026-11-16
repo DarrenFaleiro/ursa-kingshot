@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Help · {{ bot_name }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h3>How it works</h3>
+  <p>The bot does two jobs for your alliance:</p>
+  <ol>
+    <li><b>Gift codes</b> - every hour it looks for new Kingshot codes and redeems them for every linked account. Nobody has to type codes in.</li>
+    <li><b>Reminders</b> - it posts alerts before Bear Trap, Arena reset or any event you add. Members can pick a role to get pinged.</li>
+  </ol>
+  <p class="muted">Everything can be done here on the website <b>or</b> with Discord slash commands - use whichever you like.</p>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h2>For members</h2>
+    <div class="scroll"><table>
+      <tr><th>I want to…</th><th>Website</th><th>Discord</th></tr>
+      <tr><td>Link my account</td><td><a href="/">Home</a> → Link an account</td><td><code>/add</code></td></tr>
+      <tr><td>Unlink it</td><td>Home → Unlink</td><td><code>/remove</code></td></tr>
+      <tr><td>Fix my kingdom</td><td>Ask a manager</td><td><code>/player edit</code></td></tr>
+      <tr><td>See my accounts</td><td>Home</td><td><code>/myaccounts</code></td></tr>
+      <tr><td>See what I got</td><td>Click the account</td><td><code>/history</code></td></tr>
+      <tr><td>See codes</td><td><a href="/codes">Gift codes</a></td><td><code>/code list</code></td></tr>
+      <tr><td>See what's coming up</td><td>Server → Timeline</td><td><code>/timeline</code></td></tr>
+      <tr><td>See battle plans</td><td>Server → Battle plans</td><td><code>/plan list</code>, <code>/plan show</code></td></tr>
+      <tr><td>See KvK comparison</td><td>Server → KvK</td><td><code>/kvk list</code>, <code>/kvk show</code></td></tr>
+      <tr><td>Get / stop pings</td><td colspan="2">Tap the role buttons in your server</td></tr>
+    </table></div>
+  </div>
+  <div class="card">
+    <h2>For managers</h2>
+    <div class="scroll"><table>
+      <tr><th>I want to…</th><th>Website</th><th>Discord</th></tr>
+      <tr><td>Create channels + alert roles automatically</td><td>Server → Settings → Auto setup</td><td><code>/autosetup</code></td></tr>
+      <tr><td>Set report channel / manager role</td><td>Server → Settings</td><td><code>/setup</code>, <code>/settings</code></td></tr>
+      <tr><td>Add players</td><td>Server → Players</td><td><code>/add</code></td></tr>
+      <tr><td>List players</td><td>Server → Players</td><td><code>/players</code></td></tr>
+      <tr><td>Edit / pause / resume a player</td><td>Server → Players</td><td><code>/player edit|pause|resume</code></td></tr>
+      <tr><td>Add a reminder</td><td>Server → Reminders</td><td><code>/reminder add</code></td></tr>
+      <tr><td>Edit / pause / resume / delete</td><td>Server → Reminders</td><td><code>/reminder edit|pause|resume|remove</code></td></tr>
+      <tr><td>Test a reminder</td><td>Test button</td><td><code>/reminder test</code></td></tr>
+      <tr><td>Post role buttons</td><td>Server → Reminders</td><td><code>/reminder rolebuttons</code></td></tr>
+      <tr><td>Add a code</td><td><a href="/codes">Gift codes</a></td><td><code>/code add</code></td></tr>
+      <tr><td>Redeem now</td><td>Gift codes → Redeem now</td><td><code>/code redeem-now</code></td></tr>
+      <tr><td>Build / post a battle plan</td><td>Server → Battle plans</td><td><code>/plan post</code></td></tr>
+      <tr><td>Compare kingdoms for KvK</td><td>Server → KvK</td><td><code>/kvk post</code></td></tr>
+      <tr><td>See recent claims</td><td>Server → Overview</td><td><code>/claims</code></td></tr>
+      <tr><td>Give officers dashboard access</td><td>Server → Settings</td><td><code>/access grant</code>, <code>/access list</code></td></tr>
+      <tr><td>Privacy (who sees claims, hide names)</td><td>Server → Settings</td><td><code>/privacy</code></td></tr>
+      <tr><td>Check the gift-code site</td><td>Gift codes → Check salt</td><td><code>/code check-salt</code></td></tr>
+    </table></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Good to know</h2>
+  <ul>
+    <li><b>Times:</b> forms use <b>UTC</b>, which is Kingshot's game time. Everywhere else the website shows your own time zone.</li>
+    <li><b>Two Bear Traps:</b> Group 1 and Group 2 are separate reminders with their own roles, so members only get pinged for their group.</li>
+    <li><b>Defaults:</b> Bear Trap repeats every 48h (alerts 30, 10 and 0 min before). Arena repeats every 24h (60 and 15 min before). Change them to match your alliance.</li>
+    <li><b>Paused account?</b> Usually the kingdom number is wrong. Edit the player with the right kingdom and it resumes.</li>
+    <li><b>Auto setup</b> makes a 👑 Kingshot category (gift-codes, bear-trap, arena, events, pick-your-alerts), alert roles and a Kingshot Manager role. Run it again any time - it never duplicates. Give <i>Kingshot Manager</i> to your R4s.</li>
+    <li><b>Privacy:</b> by default only admins and officers see recent claims and activity. Admins can let members see them, with names and IDs hidden (e.g. <code>3153•••276</code>).</li>
+    <li><b>Officers:</b> give a role like R4 access to just the sections they need - view or edit - without Discord admin powers.</li>
+    <li><b>KvK numbers</b> are typed in by your officers. Kingshot doesn't publish player power, so the comparison is only as good as the list you paste.</li>
+    <li><b>Colours:</b> tap 🎨 at the top to pick a colour and light/dark mode. It's saved in your browser.</li>
+    <li><b>Role buttons not working?</b> The bot needs <i>Manage Roles</i>, and its role must sit above the alert roles in Server Settings → Roles.</li>
+    <li><b>Don't see your server?</b> Click <i>Refresh my servers</i> on the home page.</li>
+  </ul>
+</div>
+{% endblock %}

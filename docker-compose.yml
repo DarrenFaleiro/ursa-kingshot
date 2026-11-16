@@ -1,0 +1,30 @@
+services:
+  kingshot-bot:
+    build: .
+    container_name: kingshot-bot
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:${WEB_HOST_PORT:-8080}:8080"   # port on your computer (set WEB_HOST_PORT in .env)
+    volumes:
+      - ./data:/app/data        # database survives restarts/rebuilds
+
+  # HTTPS front door - only used on the Azure server:
+  #   docker compose --profile https up -d --build
+  caddy:
+    image: caddy:2
+    profiles: ["https"]
+    container_name: caddy
+    restart: unless-stopped
+    env_file: .env              # reads DOMAIN
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data        # keeps the HTTPS certificate
+    depends_on:
+      - kingshot-bot
+
+volumes:
+  caddy_data:

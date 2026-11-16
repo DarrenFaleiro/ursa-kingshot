@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card" style="max-width:440px;margin:8vh auto 0;text-align:center;padding:36px 28px">
+  <img src="/static/logo.png" alt="" style="width:96px;height:96px;border-radius:50%;display:block;margin:0 auto 16px;box-shadow:var(--shadow)">
+  <h1 class="largetitle" style="font-size:30px">{{ bot_name }}</h1>
+  <p class="subtitle">Gift codes and Bear Trap, Arena &amp; event reminders for your Kingshot alliance.</p>
+  {% if configured %}
+    <div class="row" style="justify-content:center;margin-top:24px"><a class="btn discord" href="/auth/discord">Log in with Discord</a></div>
+    <p class="hint" style="margin-top:16px">We only see your username and which servers you're in.</p>
+  {% else %}
+    <p class="toast-inline muted" style="margin-top:18px">DISCORD_CLIENT_ID and DISCORD_CLIENT_SECRET aren't set in .env yet, so login is switched off.</p>
+  {% endif %}
+</div>
+{% endblock %}

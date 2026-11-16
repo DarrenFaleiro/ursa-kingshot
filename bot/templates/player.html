@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2>{{ p.nickname or "Player" }}</h2>
+  <p>ID <b>{{ p.fid }}</b> · Kingdom <b>{{ p.kid }}</b> · {{ "active" if p.enabled else "paused" }}
+     · added {{ p.added_at|dt }} by {{ p.added_by }}</p>
+  {% if p.guild_id %}<a href="/g/{{ p.guild_id }}">← back to server</a>{% else %}<a href="/">← back</a>{% endif %}
+</div>
+<div class="card">
+  <h2>Redemption history</h2>
+  {% if history %}
+  <table>
+    <tr><th>Code</th><th>Result</th><th>Website message</th><th>When</th></tr>
+    {% for h in history %}
+    <tr><td><b>{{ h.code }}</b></td><td><span class="pill {{ h.result }}">{{ h.result }}</span></td>
+        <td class="muted">{{ h.message }}</td><td class="muted">{{ h.at|dt }}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted">Nothing redeemed yet.</p>{% endif %}
+</div>
+{% endblock %}

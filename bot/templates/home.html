@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div>
+  <h1 class="largetitle">Hi {{ me.username }} 👋</h1>
+  <p class="subtitle">Pick a server to manage, or link your own Kingshot account.</p>
+</div>
+
+<div class="card">
+  <h2>Your servers</h2>
+  {% if servers %}
+  <div class="cards">
+    {% for s in servers %}
+    <a class="card" href="/g/{{ s.id }}" style="background:var(--glass-2);box-shadow:none">
+      {% if s.icon %}<img class="icon" src="{{ s.icon }}" alt="">{% else %}<div class="icon">{{ s.name[:1] }}</div>{% endif %}
+      <div style="flex:1"><b>{{ s.name }}</b>
+        <span class="pill {{ 'ok' if s.role == 'admin' else '' }}" style="margin-left:4px">{{ {'admin': 'Admin', 'officer': 'Officer', 'member': 'Member'}[s.role] }}</span><br>
+        <span class="muted">{% if s.role != 'member' %}{{ s.players }} players · {% endif %}{{ s.reminders }} reminders</span></div>
+      <span class="muted" style="font-size:22px">›</span>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty"><div class="big">🏰</div>
+    None of your servers have the bot yet.<br>Add it to a server you run, or ask your alliance admin to.
+    {% if invite_url %}<div class="row" style="justify-content:center"><a class="btn discord" href="{{ invite_url }}" target="_blank">Add the bot to a server</a></div>{% endif %}
+  </div>
+  {% endif %}
+  <form method="post" action="/refresh" class="row">
+    <button class="small">↻ Refresh my servers</button>
+    <span class="muted">Joined a new server or got new access? Click this.</span>
+    {% if servers and invite_url %}<a class="muted" style="margin-left:auto" href="{{ invite_url }}" target="_blank">+ Add bot to another server</a>{% endif %}
+  </form>
+</div>
+
+<div class="card">
+  <h2>My Kingshot accounts</h2>
+  {% if mine %}
+  <div class="scroll"><table>
+    <thead><tr><th>Name</th><th>Player ID</th><th>Kingdom</th><th>Server</th><th>Status</th><th></th></tr></thead>
+    {% for p in mine %}
+    <tr>
+      <td><a href="/player/{{ p.fid }}">{{ p.nickname or "(no name)" }}</a></td><td>{{ p.fid }}</td><td>{{ p.kid }}</td>
+      <td class="muted">{{ (me.guilds.names or {}).get(p.guild_id, p.guild_id) }}</td>
+      <td>{% if p.enabled %}<span class="pill ok">getting codes</span>{% else %}<span class="pill bad">paused - check kingdom</span>{% endif %}</td>
+      <td style="text-align:right"><form method="post" action="/me/players/{{ p.fid }}/delete" class="inline"
+          data-confirm="Unlink this account?"><button class="small danger">Unlink</button></form></td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  {% else %}
+  <p class="muted" style="margin-top:0">You haven't linked an account yet. Gift codes are redeemed automatically for linked accounts.</p>
+  {% endif %}
+
+  {% if join_options %}
+  <details {% if not mine %}open{% endif %} style="margin-top:12px"><summary>+ Link an account</summary>
+  <form method="post" action="/me/players/add">
+    <div class="fields">
+      <div><label>Player ID</label><input name="fid" required inputmode="numeric" placeholder="12345678">
+        <div class="hint">Tap your avatar in Kingshot</div></div>
+      <div><label>Kingdom</label><input name="kid" required inputmode="numeric" placeholder="123">
+        <div class="hint">The # number on your profile</div></div>
+      <div><label>Name (optional)</label><input name="name" placeholder="Your in-game name"></div>
+      <div><label>Alliance server</label><select name="guild_id">
+        {% for o in join_options %}<option value="{{ o.id }}">{{ o.name }}</option>{% endfor %}</select></div>
+    </div>
+    <div class="row"><button>Link account</button></div>
+  </form>
+  </details>
+  {% endif %}
+</div>
+
+{% if is_owner %}
+<div class="card">
+  <h2>Gift-code engine (owner)</h2>
+  <div class="stats">
+    <div class="stat"><b><span class="pill {{ 'ok' if salt == 'ok' else 'bad' }}">{{ salt }}</span></b><span class="muted">gift-code site</span></div>
+    <div class="stat"><b>{{ "Running" if running else "Idle" }}</b><span class="muted">{% if next_run %}next check {{ next_run|countdown }}{% endif %}</span></div>
+  </div>
+  <p class="muted">Last run:</p><pre>{{ last }}</pre>
+  {% if unassigned %}
+  <p class="muted" style="margin-top:12px">⚠️ {{ unassigned|length }} player(s) from the old single-server version have no server.
+    They still get codes. Re-add them in the right server so they show up there.</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

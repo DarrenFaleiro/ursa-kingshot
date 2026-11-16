@@ -1,0 +1,672 @@
+{% extends "base.html" %}
+{% block title %}{{ g.name }} · {{ bot_name }}{% endblock %}
+
+{% macro reminder_fields(r=None) %}
+<div class="fields">
+  <div><label>Type</label><select name="kind" data-kind>
+    {% for k, v in kinds.items() %}<option value="{{ k }}" {% if r and r.kind == k %}selected{% endif %}>{{ v.emoji }} {{ v.label }}</option>{% endfor %}
+  </select></div>
+  <div><label>Name</label><input name="name" value="{{ r.name if r else '' }}" placeholder="e.g. Bear Trap — Group 1"></div>
+  <div><label>First date (UTC)</label><input type="date" name="date" value="{{ r.start_at|ymd if r else today }}"></div>
+  <div><label>Start time (UTC = game time)</label><input type="time" name="time" required value="{{ r.start_at|hm if r else '' }}">
+    <div class="hint localhint"></div></div>
+  <div><label>Repeat every … hours</label>
+    <input name="repeat_hours" type="number" min="0" step="any" value="{{ (r.repeat_minutes / 60)|round(2) if r else '' }}" placeholder="Bear 48 · Arena 24 · 0 = once"></div>
+  <div><label>Alert … minutes before</label><input name="before" value="{{ r.before_minutes if r else '' }}" placeholder="e.g. 30,15,0">
+    <div class="hint">0 = at start time</div></div>
+  <div><label>Post in channel</label><select name="channel_id" required>
+    {% for c in channels %}<option value="{{ c.id }}" {% if r and r.channel_id == c.id|string %}selected{% endif %}>#{{ c.name }}</option>{% endfor %}
+  </select></div>
+  <div><label>Ping a role? (optional)</label><select name="role_id" data-role>
+    <option value="">No ping - just post</option>
+    <option value="__new__">+ Create a new role…</option>
+    {% for ro in roles %}<option value="{{ ro.id }}" {% if r and r.role_id == ro.id|string %}selected{% endif %}>@{{ ro.name }}</option>{% endfor %}
+  </select></div>
+  <div data-newrole style="display:none"><label>New role name</label><input name="new_role_name" placeholder="e.g. Bear Trap alerts"></div>
+</div>
+<label>Extra message (optional)</label>
+<input name="message" value="{{ (r.message or '') if r else '' }}" placeholder="e.g. Rally leaders get ready!">
+{% endmacro %}
+
+{% block content %}
+<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+  {% if g.icon %}<img class="icon" src="{{ g.icon.url }}" alt="" style="width:64px;height:64px;border-radius:18px">
+  {% else %}<div class="icon" style="width:64px;height:64px;border-radius:18px;font-size:26px">{{ g.name[:1] }}</div>{% endif %}
+  <div style="flex:1;min-width:200px">
+    <h1 class="largetitle">{{ g.name }}</h1>
+    <p class="subtitle">
+      <span class="pill {{ 'ok' if p.role == 'admin' else '' }}">{{ {'admin': 'Admin', 'officer': 'Officer', 'member': 'Member'}[p.role] }}</span>
+      &nbsp;Times show in your time zone · forms use UTC (game time)</p>
+  </div>
+</div>
+
+<div class="tabs">
+  <a href="#overview">Overview</a>
+  <a href="#timeline">Timeline</a>
+  {% if p.reminders %}<a href="#reminders">Reminders · {{ reminders|length }}</a>{% endif %}
+  {% if p.plans %}<a href="#plans">Battle plans</a>{% endif %}
+  {% if p.kvk %}<a href="#kvk">KvK</a>{% endif %}
+  {% if p.players %}<a href="#players">Players · {{ players|length }}</a>{% endif %}
+  {% if p.settings >= 2 or p.access >= 2 %}<a href="#settings">Settings</a>{% endif %}
+</div>
+
+<!-- ================= OVERVIEW ================= -->
+<section class="tab" id="tab-overview">
+  {% if p.role == 'admin' and not auto_done %}
+  <div class="card" style="background:linear-gradient(135deg, color-mix(in srgb, var(--accent) 28%, var(--glass)), var(--glass))">
+    <h3>✨ Let the bot set up your server</h3>
+    <p class="muted" style="margin:4px 0 0">Creates a Kingshot category with gift-code, Bear Trap, Arena and event channels,
+      roles for <b>both Bear Trap groups</b>, Arena and events, plus alert buttons.</p>
+    <form method="post" action="/g/{{ gid }}/autosetup" class="row" data-confirm="Create the Kingshot category, channels and roles in {{ g.name }}?">
+      <button>Run auto setup</button><a href="#settings" class="muted">What does it make?</a>
+    </form>
+  </div>
+  {% endif %}
+
+  {% set done = checklist|selectattr(1)|list|length %}
+  {% if checklist and done < checklist|length %}
+  <div class="card">
+    <h2>Getting started · {{ done }}/{{ checklist|length }}</h2>
+    {% for text, ok, tab in checklist %}
+    <div class="check {{ 'done' if ok }}"><div class="box">{{ '✓' if ok else loop.index }}</div>
+      <span>{{ text }}</span>{% if not ok %}<a href="#{{ tab }}" class="muted">Do it →</a>{% endif %}</div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="stats">
+    <div class="stat"><b>{{ reminders|selectattr("enabled")|list|length }}</b><span class="muted">reminders on</span></div>
+    <div class="stat"><b>{{ codes|selectattr("status", "equalto", "active")|list|length }}</b><span class="muted">active codes</span></div>
+    {% if p.players %}<div class="stat"><b>{{ players|selectattr("enabled")|list|length }}</b><span class="muted">linked accounts</span></div>{% endif %}
+    {% if p.plans %}<div class="stat"><b>{{ plans|length }}</b><span class="muted">battle plans</span></div>{% endif %}
+  </div>
+
+  {% set upcoming = reminders|selectattr("enabled")|selectattr("next")|sort(attribute="next")|list %}
+  <div class="grid">
+    <div class="card">
+      <h2>Coming up</h2>
+      {% for r in upcoming[:5] %}
+        {% set k = kinds[r.kind] if r.kind in kinds else kinds.custom %}
+        <div class="check"><div class="box" style="background:rgb({{ k.color|join(',') }});color:#fff">{{ k.emoji }}</div>
+          <span><b>{{ r.name }}</b><br><span class="muted">{{ r.next|countdown }}</span></span></div>
+      {% else %}
+        <div class="empty"><div class="big">⏰</div>No reminders yet.{% if p.reminders >= 2 %} <a href="#reminders">Add Bear Trap or Arena →</a>{% endif %}</div>
+      {% endfor %}
+      <div class="row"><a href="#timeline" class="muted">Full 7-day timeline →</a></div>
+    </div>
+    <div class="card">
+      <h2>Active gift codes</h2>
+      <table>
+        {% for c in codes if c.status == 'active' %}{% if loop.index <= 6 %}<tr><td><b>{{ c.code }}</b></td>
+          <td style="text-align:right"><button type="button" class="small" data-copy="{{ c.code }}">Copy</button></td></tr>{% endif %}
+        {% else %}<tr><td class="empty">No active codes right now - new ones are found every hour.</td></tr>{% endfor %}
+      </table>
+    </div>
+  </div>
+
+  {% if p.claims %}
+  <div class="card">
+    <div class="row" style="margin:0 0 12px;justify-content:space-between">
+      <h2 style="margin:0">Recent claims</h2>
+      {% if p.mask %}<span class="muted">🔒 Names are hidden for privacy</span>{% endif %}
+    </div>
+    {% if claims %}
+    <div class="scroll"><table>
+      <thead><tr><th>Player</th><th>Code</th><th>Result</th><th>When</th></tr></thead>
+      {% for c in claims %}
+      <tr><td><b>{{ c.nickname or "(no name)" }}</b><br><span class="muted">{{ c.fid }}</span></td>
+          <td>{{ c.code }}</td>
+          <td><span class="pill {{ c.result }}">{{ {'success': 'Claimed', 'already': 'Already claimed'}.get(c.result, c.result) }}</span></td>
+          <td class="muted">{{ c.at|dt }}</td></tr>
+      {% endfor %}
+    </table></div>
+    {% else %}<div class="empty"><div class="big">🎁</div>No claims yet.</div>{% endif %}
+  </div>
+  {% endif %}
+
+  {% if log %}
+  <div class="card">
+    <h2>Activity <span class="muted" style="text-transform:none;letter-spacing:0">· only admins and officers see this</span></h2>
+    <div class="scroll"><table>
+      {% for l in log %}<tr><td class="muted" style="white-space:nowrap;width:1%">{{ l.at|dt }}</td><td>{{ l.text }}</td></tr>{% endfor %}
+    </table></div>
+  </div>
+  {% endif %}
+</section>
+
+<!-- ================= TIMELINE ================= -->
+<section class="tab" id="tab-timeline">
+  <div class="card">
+    <h2>Next 7 days</h2>
+    {% if days %}
+    <div class="timeline">
+      {% for day, events in days.items() %}
+      <div class="tl-day" data-day="{{ day }}">{{ day }}</div>
+      {% for e in events %}
+      <div class="tl-item" style="--c:rgb({{ e.kind.color|join(',') }})">
+        <div class="tl-dot">{{ e.kind.emoji }}</div>
+        <div class="tl-body">
+          <div class="tl-time">{{ e.occ|countdown }}</div>
+          <b>{{ e.rem.name }}</b>
+          {% if e.alerts %}<div class="row" style="margin-top:6px;gap:6px">
+            {% for a in e.alerts %}<span class="pill">🔔 {{ ((e.occ - a) // 60) ~ ' min before' if e.occ != a else 'at start' }}</span>{% endfor %}
+          </div>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty"><div class="big">🗓️</div>Nothing scheduled in the next 7 days.</div>
+    {% endif %}
+  </div>
+</section>
+
+{% if p.reminders %}
+<section class="tab" id="tab-reminders">
+  {% if p.reminders >= 2 %}
+  <div class="card">
+    <h2>New reminder</h2>
+    <div class="quick">
+      {% for k, v in kinds.items() %}
+      <button type="button" class="tile" data-preset="{{ k }}"
+              style="--c1:rgb({{ v.color|join(',') }});--c2:color-mix(in srgb, rgb({{ v.color|join(',') }}) 55%, #000)">
+        <span class="e">{{ v.emoji }}</span>{{ v.short if k != 'custom' else 'Custom event' }}
+        <small>{{ v.group or ('every ' ~ (v.repeat_minutes // 60) ~ 'h' if v.repeat_minutes else 'any time') }}</small>
+      </button>
+      {% endfor %}
+    </div>
+    <form method="post" action="/g/{{ gid }}/reminders/add" id="newrem" style="display:none;margin-top:8px">
+      {{ reminder_fields() }}
+      <p class="hint">Alerts are <b>always posted in the channel</b> with a countdown picture. If you pick a role, it's pinged as well.</p>
+      <div class="row"><button>Create reminder</button></div>
+    </form>
+  </div>
+  {% endif %}
+
+  {% if reminders %}
+  {% for r in reminders %}
+  {% set k = kinds[r.kind] if r.kind in kinds else kinds.custom %}
+  <div class="card" style="{% if not r.enabled %}opacity:.6;{% endif %}border-left:5px solid rgb({{ k.color|join(',') }})">
+    <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+      <div class="icon" style="background:rgb({{ k.color|join(',') }})">{{ k.emoji }}</div>
+      <div style="flex:1;min-width:200px">
+        <h3>{{ r.name }}</h3>
+        <span class="muted">{{ r.next|countdown if r.next and r.enabled else ("paused" if not r.enabled else "finished") }}</span>
+      </div>
+      {% if p.reminders >= 2 %}
+      <form method="post" action="/g/{{ gid }}/reminders/{{ r.id }}/toggle" data-autosubmit title="{{ 'On' if r.enabled else 'Off' }}">
+        <label class="switch"><input type="checkbox" {% if r.enabled %}checked{% endif %}><span></span></label>
+      </form>
+      {% endif %}
+    </div>
+    <div class="row muted" style="gap:16px">
+      <span>🔁 {{ "every " ~ ((r.repeat_minutes / 60)|round(1)|string).replace(".0", "") ~ "h" if r.repeat_minutes else "once" }}</span>
+      <span>🔔 {{ r.before_minutes.replace(",", ", ") }} min before</span>
+      <span>#{{ r.channel_name }}</span>
+      {% if r.role_name %}<span>@{{ r.role_name }}</span>{% endif %}
+    </div>
+    <div class="row">
+      <button type="button" class="ghost small" data-open="preview" data-img="/g/{{ gid }}/reminders/{{ r.id }}/preview.png">👁 Preview</button>
+      {% if p.reminders >= 2 %}
+      <form method="post" action="/g/{{ gid }}/reminders/{{ r.id }}/test" class="inline"><button class="small" title="Post a test alert now">Send test</button></form>
+      <form method="post" action="/g/{{ gid }}/reminders/{{ r.id }}/delete" class="inline" data-confirm="Delete {{ r.name }}?"><button class="small danger">Delete</button></form>
+      {% endif %}
+    </div>
+    {% if p.reminders >= 2 %}
+    <details style="margin-top:12px"><summary>✏️ Edit</summary>
+      <form method="post" action="/g/{{ gid }}/reminders/{{ r.id }}/edit">{{ reminder_fields(r) }}
+        <div class="row"><button>Save changes</button></div></form>
+    </details>
+    {% endif %}
+  </div>
+  {% endfor %}
+  {% else %}
+  <div class="card empty"><div class="big">⏰</div>No reminders yet - tap a tile above to start.</div>
+  {% endif %}
+
+  {% if p.reminders >= 2 %}
+  <div class="card">
+    <h2>Let members choose their pings</h2>
+    <p class="muted" style="margin-top:0">Posts one button per alert role. Members tap to get pinged (or stop).
+      The bot needs <b>Manage Roles</b>, and its role must be above the alert roles.</p>
+    <form method="post" action="/g/{{ gid }}/rolebuttons" class="row">
+      <select name="channel_id" style="max-width:280px">{% for c in channels %}<option value="{{ c.id }}">#{{ c.name }}</option>{% endfor %}</select>
+      <button class="ghost">Post role buttons</button>
+    </form>
+  </div>
+  {% endif %}
+</section>
+{% endif %}
+
+<!-- ================= BATTLE PLANS ================= -->
+{% if p.plans %}
+<section class="tab" id="tab-plans">
+  {% if p.plans >= 2 %}
+  <div class="card">
+    <div class="row" style="margin:0;justify-content:space-between">
+      <h2 style="margin:0">Battle plans</h2>
+      <button type="button" data-plan-new>+ New plan</button>
+    </div>
+    <form method="post" action="/g/{{ gid }}/plans/save" id="planform" style="display:none;margin-top:12px">
+      <input type="hidden" name="plan_id"><input type="hidden" name="data">
+      <div class="fields">
+        <div><label>Plan name</label><input name="name" required placeholder="e.g. KvK Castle Push"></div>
+        <div><label>Type</label><select name="kind">
+          {% for k, v in plan_kinds.items() %}<option value="{{ k }}">{{ v.emoji }} {{ v.label }}</option>{% endfor %}</select></div>
+        <div><label>Date (UTC, optional)</label><input type="date" name="date"></div>
+        <div><label>Time (UTC, optional)</label><input type="time" name="time"><div class="hint localhint"></div></div>
+      </div>
+      <label>Notes for everyone</label>
+      <input name="notes" placeholder="e.g. Hold the castle 20 minutes, then swap defenders">
+      <h2 style="margin:18px 0 6px">Squads</h2>
+      <div id="squads" class="cards"></div>
+      <div class="row">
+        <button type="button" class="ghost" data-add-squad>+ Add squad</button>
+        <span style="flex:1"></span>
+        <button type="button" class="small" data-plan-cancel>Cancel</button>
+        <button>Save plan</button>
+      </div>
+    </form>
+  </div>
+  {% endif %}
+
+  {% for pl in plans %}
+  {% set k = plan_kinds[pl.kind] if pl.kind in plan_kinds else plan_kinds.other %}
+  <div class="card" style="border-left:5px solid rgb({{ k.color|join(',') }})">
+    <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+      <div class="icon" style="background:rgb({{ k.color|join(',') }})">{{ k.emoji }}</div>
+      <div style="flex:1;min-width:200px">
+        <h3>{{ pl.name }}</h3>
+        <span class="muted">{{ k.label }} · {{ pl.data.squads|length }} squads
+          {% if pl.data.when %}· {{ pl.data.when|countdown }}{% endif %} · updated by {{ pl.updated_by }}</span>
+      </div>
+    </div>
+    {% if pl.data.notes %}<p style="margin:12px 0 0">{{ pl.data.notes }}</p>{% endif %}
+    <div class="cards" style="margin-top:12px">
+      {% for sq in pl.data.squads %}
+      <div class="stat">
+        <b style="font-size:17px">{{ sq.name }}</b>
+        <span class="muted">{{ [sq.target, sq.time]|select|join(' · ') }}</span>
+        <div style="margin-top:6px">👑 <b>{{ sq.leader or '-' }}</b></div>
+        <div class="muted">{{ sq.joiners|join(', ') or 'No joiners yet' }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="row">
+      <button type="button" class="ghost small" data-open="planimg" data-img="/g/{{ gid }}/plans/{{ pl.id }}.png">🖼 Image</button>
+      <a class="btn small" href="/g/{{ gid }}/plans/{{ pl.id }}.png" download="{{ pl.name }}.png">⬇ Download</a>
+      {% if p.plans >= 2 %}
+      <button type="button" class="small" data-plan-edit='{{ {"id": pl.id, "name": pl.name, "kind": pl.kind, "data": pl.data}|tojson|forceescape }}'>✏️ Edit</button>
+      <form method="post" action="/g/{{ gid }}/plans/{{ pl.id }}/post" class="row" style="margin:0">
+        <select name="channel_id" style="width:auto">{% for c in channels %}<option value="{{ c.id }}">#{{ c.name }}</option>{% endfor %}</select>
+        <button class="small">Post to Discord</button>
+      </form>
+      <form method="post" action="/g/{{ gid }}/plans/{{ pl.id }}/delete" class="inline" data-confirm="Delete {{ pl.name }}?"><button class="small danger">Delete</button></form>
+      {% endif %}
+    </div>
+  </div>
+  {% else %}
+  <div class="card empty"><div class="big">🗺️</div>No battle plans yet.{% if p.plans >= 2 %} Tap <b>+ New plan</b> to build squads for Castle, KvK or Bear Trap.{% endif %}</div>
+  {% endfor %}
+</section>
+{% endif %}
+
+<!-- ================= KVK ================= -->
+{% if p.kvk %}
+<section class="tab" id="tab-kvk">
+  <div class="card">
+    <div class="row" style="margin:0;justify-content:space-between">
+      <h2 style="margin:0">KvK comparison</h2>
+      {% if p.kvk >= 2 %}<button type="button" data-kvk-new>+ New comparison</button>{% endif %}
+    </div>
+    {% if kvks %}
+    <div class="row">
+      {% for k in kvks %}<a class="btn small {{ 'ghost' if sel_kvk and k.id == sel_kvk.id }}" href="?kvk={{ k.id }}#kvk">{{ k.title }}</a>{% endfor %}
+    </div>
+    {% endif %}
+  </div>
+
+  {% if sel_kvk %}
+  {% set r = sel_kvk.result %}
+  {% set d = sel_kvk.data %}
+  <div class="card verdict {{ r.mood }}">
+    <h3>#{{ d.our_kingdom or '?' }} vs #{{ d.their_kingdom or '?' }}</h3>
+    <p style="margin:6px 0 0;font-size:17px">{{ r.verdict }}</p>
+    {% if d.notes %}<p class="muted" style="margin:8px 0 0">{{ d.notes }}</p>{% endif %}
+  </div>
+  <div class="stats">
+    <div class="stat"><b>{{ r.ours.top_total|power }}</b><span class="muted">our top {{ r.n }}</span></div>
+    <div class="stat"><b>{{ r.theirs.top_total|power }}</b><span class="muted">their top {{ r.n }}</span></div>
+    <div class="stat"><b>{{ r.wins }}/{{ r.n }}</b><span class="muted">rank matchups we win</span></div>
+    <div class="stat"><b>{{ r.ours.count }} v {{ r.theirs.count }}</b><span class="muted">players listed</span></div>
+  </div>
+  <div class="card">
+    <h2>Rank by rank</h2>
+    <div class="scroll"><table class="duel">
+      <thead><tr><th>#</th><th>Us · #{{ d.our_kingdom }}</th><th></th><th>Them · #{{ d.their_kingdom }}</th></tr></thead>
+      {% for m in r.pairs %}
+      <tr>
+        <td class="muted">{{ m.rank }}</td>
+        <td><b>{{ m.ours.name if m.ours else '-' }}</b> <span class="muted">{{ m.ours.power|power if m.ours else '' }}</span>
+          <div class="bar"><i style="width:{{ m.our_pct }}%;background:var(--ok)"></i></div></td>
+        <td style="text-align:center"><span class="pill {{ 'ok' if m.diff > 0 else 'bad' if m.diff < 0 else '' }}">{{ ('+' if m.diff > 0 else '') ~ (m.diff|power) }}</span></td>
+        <td><b>{{ m.theirs.name if m.theirs else '-' }}</b> <span class="muted">{{ m.theirs.power|power if m.theirs else '' }}</span>
+          <div class="bar"><i style="width:{{ m.their_pct }}%;background:var(--bad)"></i></div></td>
+      </tr>
+      {% endfor %}
+    </table></div>
+    {% if p.kvk >= 2 %}
+    <div class="row">
+      <button type="button" class="small" data-kvk-edit='{{ {"id": sel_kvk.id, "title": sel_kvk.title, "data": d}|tojson|forceescape }}'>✏️ Edit</button>
+      <form method="post" action="/g/{{ gid }}/kvk/{{ sel_kvk.id }}/post" class="row" style="margin:0">
+        <select name="channel_id" style="width:auto">{% for c in channels %}<option value="{{ c.id }}">#{{ c.name }}</option>{% endfor %}</select>
+        <button class="small">Post to Discord</button>
+      </form>
+      <form method="post" action="/g/{{ gid }}/kvk/{{ sel_kvk.id }}/delete" class="inline" data-confirm="Delete this comparison?"><button class="small danger">Delete</button></form>
+    </div>
+    {% endif %}
+  </div>
+  {% elif not kvks %}
+  <div class="card empty"><div class="big">⚔️</div>No comparisons yet.{% if p.kvk >= 2 %} Tap <b>+ New comparison</b> and paste both kingdoms' top players.{% endif %}</div>
+  {% endif %}
+
+  {% if p.kvk >= 2 %}
+  <div class="card" id="kvkform" style="display:none">
+    <h2>Comparison details</h2>
+    <form method="post" action="/g/{{ gid }}/kvk/save">
+      <input type="hidden" name="kvk_id">
+      <div class="fields">
+        <div><label>Title (optional)</label><input name="title" placeholder="e.g. KvK Season 3"></div>
+        <div><label>Our kingdom #</label><input name="our_kingdom" inputmode="numeric" placeholder="2041"></div>
+        <div><label>Their kingdom #</label><input name="their_kingdom" inputmode="numeric" placeholder="1987"></div>
+        <div><label>Compare top …</label><input name="top_n" type="number" min="3" max="100" value="10"></div>
+      </div>
+      <div class="grid" style="margin-top:4px">
+        <div><label>Our players (one per line: name, power)</label>
+          <textarea name="ours" rows="10" placeholder="Darkblade, 152.3M&#10;Nova 98,500,000&#10;Rook | 1.2B"></textarea></div>
+        <div><label>Their players (one per line: name, power)</label>
+          <textarea name="theirs" rows="10" placeholder="Titan 1.1B&#10;Ace, 160M&#10;Bolt 60M"></textarea></div>
+      </div>
+      <div class="hint">Power can be 152300000, 152,300,000, 152.3M, 1.2B or 950K. Order doesn't matter - it's sorted for you.</div>
+      <label>Notes (optional)</label><input name="notes" placeholder="e.g. Their #1 shields at night">
+      <div class="row"><button>Save comparison</button><button type="button" class="small" data-kvk-cancel>Cancel</button></div>
+    </form>
+  </div>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if p.players %}
+<section class="tab" id="tab-players">
+  {% if p.players >= 2 %}
+  <div class="card">
+    <h2>Add players</h2>
+    <form method="post" action="/g/{{ gid }}/players/add">
+      <textarea name="players" placeholder="One per line:  PLAYER_ID  KINGDOM  name (optional)&#10;12345678 123 PlayerOne&#10;87654321 123"></textarea>
+      <div class="hint">Player ID: tap your avatar in Kingshot. Kingdom: the # number on your profile.
+        Members can also add themselves with <code>/add</code>.</div>
+      <div class="row"><button>Add players</button></div>
+    </form>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <div class="row" style="margin:0 0 12px;justify-content:space-between">
+      <h2 style="margin:0">Players</h2>
+      {% if players %}<input data-filter="ptable" placeholder="🔍  Search name, ID or kingdom" style="max-width:300px">{% endif %}
+    </div>
+    {% if players %}
+    <div class="scroll"><table id="ptable">
+      <thead><tr><th>Name</th><th>Player ID</th><th>Kingdom</th><th>Codes</th><th></th></tr></thead>
+      <tbody>
+      {% set can_edit_players = p.players >= 2 %}{% for p in players %}
+      <tr>
+        <td><a href="/player/{{ p.fid }}"><b>{{ p.nickname or "(no name)" }}</b></a>
+          {% if not p.enabled %}<br><span class="pill bad" title="Often a wrong kingdom - edit to fix">paused</span>{% endif %}</td>
+        <td>{{ p.fid }}</td><td>{{ p.kid }}</td>
+        <td>{% if can_edit_players %}<form method="post" action="/g/{{ gid }}/players/{{ p.fid }}/toggle" data-autosubmit>
+          <label class="switch"><input type="checkbox" {% if p.enabled %}checked{% endif %}><span></span></label></form>
+          {% else %}<span class="pill {{ 'ok' if p.enabled else 'bad' }}">{{ 'on' if p.enabled else 'paused' }}</span>{% endif %}</td>
+        <td style="text-align:right;white-space:nowrap">{% if can_edit_players %}
+          <details style="display:inline-block;text-align:left"><summary class="btn small">Edit</summary>
+            <form method="post" action="/g/{{ gid }}/players/{{ p.fid }}/edit" class="row">
+              <input name="name" value="{{ p.nickname or '' }}" placeholder="name" style="width:130px">
+              <input name="kid" value="{{ p.kid }}" placeholder="kingdom" style="width:90px"><button class="small">Save</button></form>
+          </details>
+          <form method="post" action="/g/{{ gid }}/players/{{ p.fid }}/delete" class="inline" data-confirm="Remove {{ p.nickname or p.fid }}?"><button class="small danger">Remove</button></form>
+        {% endif %}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+    {% else %}
+    <div class="empty"><div class="big">👥</div>No players yet. Add some above, or tell members to type <code>/add</code> in Discord.</div>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
+
+<!-- ================= SETTINGS ================= -->
+{% if p.settings >= 2 or p.access >= 2 %}
+<section class="tab" id="tab-settings">
+  {% if p.settings >= 2 %}
+  <div class="card">
+    <h2>Privacy</h2>
+    <form method="post" action="/g/{{ gid }}/privacy">
+      <div class="check" style="justify-content:space-between">
+        <span><b>Members can see recent claims</b><br><span class="muted">Off = only admins and officers see claims and activity.</span></span>
+        <label class="switch"><input type="checkbox" name="members_see_activity" {% if settings.prefs.members_see_activity %}checked{% endif %}><span></span></label>
+      </div>
+      <div class="check" style="justify-content:space-between">
+        <span><b>Hide names and player IDs from members</b><br><span class="muted">Members see e.g. <code>D•••</code> and <code>3153•••276</code>. Admins and officers with player access always see real names.</span></span>
+        <label class="switch"><input type="checkbox" name="mask_for_members" {% if settings.prefs.mask_for_members %}checked{% endif %}><span></span></label>
+      </div>
+      <div class="row"><button>Save privacy</button></div>
+    </form>
+  </div>
+  {% endif %}
+
+  {% if p.access >= 2 %}
+  <div class="card">
+    <h2>Dashboard access</h2>
+    <p class="muted" style="margin-top:0">Let officers use this dashboard without giving them Discord admin powers.
+      Choose a role (e.g. R4) or a single member, then pick what they can <b>view</b> or <b>edit</b>.</p>
+    {% if grants %}
+    <div class="scroll"><table>
+      <thead><tr><th>Who</th><th>Access</th><th></th></tr></thead>
+      {% for gr in grants %}
+      <tr><td><b>{{ gr.label }}</b><br><span class="muted">{{ 'Role' if gr.target_type == 'role' else 'Member' }}</span></td>
+        <td>{% for sec, lvl in gr.perms.items() %}<span class="pill {{ 'ok' if lvl == 'edit' else '' }}" style="margin:2px">{{ sections[sec] }} · {{ lvl }}</span>{% endfor %}</td>
+        <td style="text-align:right"><form method="post" action="/g/{{ gid }}/access/{{ gr.id }}/delete" class="inline" data-confirm="Remove access for {{ gr.label }}?"><button class="small danger">Remove</button></form></td></tr>
+      {% endfor %}
+    </table></div>
+    {% endif %}
+    <details {% if not grants %}open{% endif %} style="margin-top:12px"><summary>+ Give someone access</summary>
+      <form method="post" action="/g/{{ gid }}/access/add">
+        <div class="modes" style="max-width:320px;margin-top:6px">
+          <button type="button" class="on" data-target-pick="role">Role</button>
+          <button type="button" data-target-pick="user">Member</button>
+        </div>
+        <input type="hidden" name="target_type" value="role">
+        <div data-target="role"><label>Role</label><select name="role_id">
+          {% for ro in roles %}<option value="{{ ro.id }}">@{{ ro.name }}</option>{% endfor %}</select></div>
+        <div data-target="user" style="display:none"><label>Discord user ID</label>
+          <input name="user_id" inputmode="numeric" placeholder="Right-click them in Discord → Copy User ID">
+          <div class="hint">Needs Developer Mode on in Discord (Settings → Advanced).</div></div>
+        <label>What can they do?</label>
+        <div class="fields">
+          {% for sec, label in sections.items() %}
+          <div><label style="margin-top:4px">{{ label }}</label><select name="perm_{{ sec }}">
+            <option value="">No access</option><option value="view">View</option><option value="edit">Edit</option></select></div>
+          {% endfor %}
+        </div>
+        <div class="row"><button>Save access</button></div>
+      </form>
+    </details>
+  </div>
+  {% endif %}
+{% if p.settings >= 2 %}
+  <div class="card">
+    <h2>Auto setup {% if auto_done %}<span class="pill ok">done</span>{% endif %}</h2>
+    <p style="margin-top:0">One tap makes everything for you:</p>
+    <ul class="muted" style="margin-top:0">
+      <li>A <b>👑 Kingshot</b> category with 🎁 gift-codes, 🐻 bear-trap, ⚔️ arena, 📅 events and 🔔 pick-your-alerts channels</li>
+      <li>Roles: <b>Bear Trap — Group 1</b>, <b>Bear Trap — Group 2</b>, <b>Arena alerts</b>, <b>Event alerts</b> and <b>Kingshot Manager</b></li>
+      <li>Sets the report channel and manager role (if not set) and posts the alert buttons</li>
+    </ul>
+    <p class="hint">Safe to run again - it reuses what's already there. Needs <b>Manage Channels</b> and <b>Manage Roles</b>.</p>
+    <form method="post" action="/g/{{ gid }}/autosetup" data-confirm="Create the Kingshot category, channels and roles in {{ g.name }}?">
+      <button>{{ "Run auto setup again" if auto_done else "✨ Run auto setup" }}</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Server settings</h2>
+    <form method="post" action="/g/{{ gid }}/settings" style="max-width:520px">
+      <label>Gift-code report channel</label>
+      <select name="report_channel_id"><option value="">Don't post reports</option>
+        {% for c in channels %}<option value="{{ c.id }}" {% if settings.report_channel_id == c.id|string %}selected{% endif %}>#{{ c.name }}</option>{% endfor %}
+      </select>
+      <div class="hint">New codes and results are posted here.</div>
+      <label>Bot-manager role</label>
+      <select name="manager_role_id"><option value="">Only people with Manage Server</option>
+        {% for ro in roles %}<option value="{{ ro.id }}" {% if settings.manager_role_id == ro.id|string %}selected{% endif %}>@{{ ro.name }}</option>{% endfor %}
+      </select>
+      <div class="hint">People with this role can use this website and the manager commands (e.g. R4s).</div>
+      <div class="row"><button>Save settings</button></div>
+    </form>
+  </div>
+  {% endif %}
+</section>
+{% endif %}
+
+<dialog id="preview"><div class="sheet glass">
+  <div class="grabber"></div>
+  <h3>Alert preview</h3>
+  <p class="muted" style="margin-top:0">This is the picture posted in Discord with the alert.</p>
+  <img data-src alt="Alert preview" style="width:100%;border-radius:14px;display:block;background:var(--field);aspect-ratio:1200/520">
+  <div class="row" style="justify-content:flex-end"><button type="button" data-close>Done</button></div>
+</div></dialog>
+<dialog id="planimg"><div class="sheet glass">
+  <div class="grabber"></div>
+  <h3>Battle plan image</h3>
+  <p class="muted" style="margin-top:0">Share this in Discord, or download it.</p>
+  <img data-src alt="Battle plan" style="width:100%;border-radius:14px;display:block;background:var(--field);min-height:200px">
+  <div class="row" style="justify-content:flex-end"><button type="button" data-close>Done</button></div>
+</div></dialog>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const PRESETS = {{ kinds|tojson }};
+const AUTO = {{ auto_defaults|tojson }};
+document.querySelectorAll("[data-preset]").forEach(b => b.addEventListener("click", () => {
+  const f = document.getElementById("newrem"), k = b.dataset.preset, p = PRESETS[k];
+  const el = n => f.elements.namedItem(n);
+  f.style.display = "block";
+  el("kind").value = k;
+  el("name").value = k === "custom" ? "" : p.label;
+  el("repeat_hours").value = p.repeat_minutes / 60;
+  el("before").value = p.before;
+  const a = AUTO[k] || {};
+  if (a.channel) el("channel_id").value = a.channel;
+  el("role_id").value = a.role || "";
+  el("role_id").dispatchEvent(new Event("change"));
+  f.scrollIntoView({behavior: "smooth", block: "center"});
+  (k === "custom" ? el("name") : el("time")).focus({preventScroll: true});
+}));
+document.querySelectorAll("select[data-role]").forEach(sel => {
+  const box = sel.closest(".fields").querySelector("[data-newrole]");
+  const upd = () => box.style.display = sel.value === "__new__" ? "" : "none";
+  sel.addEventListener("change", upd); upd();
+});
+
+// ---------- timeline day labels: Today / Tomorrow / weekday ----------
+document.querySelectorAll(".tl-day").forEach(el => {
+  const d = new Date(el.dataset.day + "T12:00:00Z"), t = new Date(); t.setHours(12, 0, 0, 0);
+  const diff = Math.round((d - t) / 86400000);
+  el.textContent = diff === 0 ? "Today" : diff === 1 ? "Tomorrow"
+    : d.toLocaleDateString(undefined, {weekday: "long", day: "numeric", month: "short"});
+});
+
+// ---------- dashboard access: role or member ----------
+document.querySelectorAll("[data-target-pick]").forEach(b => b.addEventListener("click", () => {
+  const f = b.closest("form"), t = b.dataset.targetPick;
+  f.elements.namedItem("target_type").value = t;
+  f.querySelectorAll("[data-target-pick]").forEach(x => x.classList.toggle("on", x === b));
+  f.querySelectorAll("[data-target]").forEach(x => x.style.display = x.dataset.target === t ? "" : "none");
+}));
+
+// ---------- battle plan editor ----------
+const planForm = document.getElementById("planform");
+if (planForm) {
+  const box = document.getElementById("squads");
+  const el = n => planForm.elements.namedItem(n);
+  const field = (label, name, value, ph) =>
+    `<label>${label}</label><input data-k="${name}" placeholder="${ph}">`;
+  function addSquad(sq = {}) {
+    const d = document.createElement("div");
+    d.className = "stat squad";
+    d.innerHTML = `<div class="row" style="margin:0;justify-content:space-between"><b>Squad</b>
+        <button type="button" class="small danger" data-rm>Remove</button></div>`
+      + field("Name", "name", "", "e.g. Rally 1") + field("Rally leader", "leader", "", "Player name")
+      + field("Target", "target", "", "e.g. Enemy castle") + field("Time", "time", "", "e.g. 18:00")
+      + `<label>Joiners (one per line)</label><textarea data-k="joiners" rows="4"></textarea>`
+      + field("Notes", "notes", "", "optional");
+    // values set as properties, never as HTML, so names can't inject markup
+    d.querySelectorAll("[data-k]").forEach(i => {
+      const v = sq[i.dataset.k];
+      i.value = Array.isArray(v) ? v.join("\n") : (v || "");
+    });
+    d.querySelector("[data-rm]").addEventListener("click", () => d.remove());
+    box.appendChild(d);
+  }
+  function openEditor(plan) {
+    planForm.reset(); box.innerHTML = "";
+    el("plan_id").value = plan ? plan.id : "";
+    el("name").value = plan ? plan.name : "";
+    el("kind").value = plan ? plan.kind : "kvk";
+    el("notes").value = plan ? (plan.data.notes || "") : "";
+    if (plan && plan.data.when) {
+      const w = new Date(plan.data.when * 1000).toISOString();
+      el("date").value = w.slice(0, 10); el("time").value = w.slice(11, 16);
+    }
+    ((plan && plan.data.squads.length) ? plan.data.squads : [{name: "Rally 1"}, {name: "Rally 2"}, {name: "Defence"}]).forEach(addSquad);
+    planForm.style.display = "block";
+    planForm.scrollIntoView({behavior: "smooth", block: "start"});
+  }
+  document.querySelector("[data-plan-new]").addEventListener("click", () => openEditor(null));
+  document.querySelectorAll("[data-plan-edit]").forEach(b => b.addEventListener("click", () => openEditor(JSON.parse(b.dataset.planEdit))));
+  document.querySelector("[data-add-squad]").addEventListener("click", () => addSquad({}));
+  document.querySelector("[data-plan-cancel]").addEventListener("click", () => planForm.style.display = "none");
+  planForm.addEventListener("submit", () => {
+    const squads = [...box.querySelectorAll(".squad")].map(d => {
+      const o = {}; d.querySelectorAll("[data-k]").forEach(i => o[i.dataset.k] = i.value);
+      o.joiners = o.joiners.split("\n").map(s => s.trim()).filter(Boolean);
+      return o;
+    });
+    el("data").value = JSON.stringify({squads});
+  });
+}
+
+// ---------- KvK form ----------
+const kvkCard = document.getElementById("kvkform");
+if (kvkCard) {
+  const f = kvkCard.querySelector("form"), el = n => f.elements.namedItem(n);
+  const lines = ps => (ps || []).map(p => `${p.name}, ${p.power}`).join("\n");
+  function openKvk(k) {
+    f.reset(); el("kvk_id").value = k ? k.id : "";
+    if (k) {
+      el("title").value = k.title; el("our_kingdom").value = k.data.our_kingdom || "";
+      el("their_kingdom").value = k.data.their_kingdom || ""; el("top_n").value = k.data.top_n || 10;
+      el("ours").value = lines(k.data.ours); el("theirs").value = lines(k.data.theirs); el("notes").value = k.data.notes || "";
+    }
+    kvkCard.style.display = "block"; kvkCard.scrollIntoView({behavior: "smooth", block: "start"});
+  }
+  document.querySelector("[data-kvk-new]").addEventListener("click", () => openKvk(null));
+  document.querySelectorAll("[data-kvk-edit]").forEach(b => b.addEventListener("click", () => openKvk(JSON.parse(b.dataset.kvkEdit))));
+  document.querySelector("[data-kvk-cancel]").addEventListener("click", () => kvkCard.style.display = "none");
+}
+</script>
+{% endblock %}

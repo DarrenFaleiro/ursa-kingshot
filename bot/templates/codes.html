@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Gift codes · {{ bot_name }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Gift-code engine</h2>
+  <div class="stats">
+    <div class="stat"><b><span class="pill {{ 'ok' if salt == 'ok' else 'bad' }}">{{ salt }}</span></b>
+      <span class="muted">connection to the gift-code site</span></div>
+    <div class="stat"><b>{{ "Running" if running else "Idle" }}</b><span class="muted">checks automatically every hour</span></div>
+  </div>
+  <div class="row">
+    <form method="post" action="/redeem" class="inline"><button {% if running %}disabled{% endif %}>▶ Redeem now</button></form>
+    <form method="post" action="/check-salt" class="inline"><button class="ghost">Check connection</button></form>
+  </div>
+  <details style="margin-top:12px"><summary>Last run details</summary><pre>{{ last }}</pre></details>
+</div>
+
+<div class="card">
+  <h2>Add a gift code</h2>
+  <form method="post" action="/codes/add" class="row" style="margin-top:0">
+    <input name="code" required placeholder="Type it exactly - codes are case-sensitive" style="flex:1;min-width:220px">
+    <button>Add &amp; redeem</button>
+  </form>
+  <div class="hint">You usually don't need this - new codes are found automatically. It's shared by all servers.</div>
+</div>
+
+<div class="card">
+  <h2>All codes</h2>
+  {% if codes %}
+  <div class="scroll"><table>
+    <thead><tr><th>Code</th><th>Status</th><th>Results (all servers)</th><th>Found</th><th></th></tr></thead>
+    {% for c in codes %}
+    <tr>
+      <td><b>{{ c.code }}</b> <button type="button" class="small" data-copy="{{ c.code }}">Copy</button></td>
+      <td><span class="pill {{ c.status }}">{{ c.status }}</span></td>
+      <td class="muted">{% for k, v in c.stats.items() %}{{ k }} {{ v }}{% if not loop.last %}, {% endif %}{% else %}-{% endfor %}</td>
+      <td class="muted">{{ c.added_at|dt }}<br>{{ c.source }}</td>
+      <td style="text-align:right;white-space:nowrap">{% if is_owner %}
+        {% if c.status != "active" %}<form method="post" action="/codes/{{ c.code }}/reactivate" class="inline"><button class="small">Retry</button></form>{% endif %}
+        <form method="post" action="/codes/{{ c.code }}/delete" class="inline" data-confirm="Delete {{ c.code }}?"><button class="small danger">Delete</button></form>
+      {% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  {% else %}
+  <div class="empty"><div class="big">🎁</div>No codes yet - the bot checks for new ones every hour.</div>
+  {% endif %}
+</div>
+{% endblock %}

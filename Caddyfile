@@ -1,0 +1,4 @@
+# Caddy gets a free HTTPS certificate for DOMAIN automatically (from Let's Encrypt).
+{$DOMAIN} {
+	reverse_proxy kingshot-bot:8080
+}
