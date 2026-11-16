@@ -124,3 +124,74 @@ class TestMultiServerDB(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestReminderChecker(unittest.TestCase):
+    """Regression tests for the missed Bear Trap — Group 2 alert (16 Nov)."""
+
+    def test_group2_alert_after_edit(self):
+        import asyncio
+        from datetime import datetime, timezone
+        from bot.reminders import run_due
+        utc = lambda h, m, s=0: int(datetime(2026, 11, 16, h, m, s, tzinfo=timezone.utc).timestamp())
+        db = DB(":memory:")
+        rid = db.add_reminder(1, "bear_trap_2", "Bear Trap — Group 2", 555, utc(14, 0), 2880, "30,10,0", role_id=9)
+        db.update_reminder(rid, last_fire_ts=utc(13, 53))            # edited at 13:53, like the real one
+        sent = []
+
+        async def send(rem, occ, before):
+            sent.append((occ, before))
+
+        n = asyncio.run(run_due(db, send, utc(14, 0, 20)))           # checker runs 20s after start
+        self.assertEqual(n, 1)
+        self.assertEqual(sent, [(utc(14, 0), 0)])                     # the "starting now" alert
+        self.assertEqual(asyncio.run(run_due(db, send, utc(14, 0, 50))), 0)   # and not twice
+
+    def test_loop_survives_errors(self):
+        import asyncio
+        from bot import reminders
+        db = DB(":memory:")
+        calls = {"n": 0}
+        real = db.list_reminders
+
+        def flaky(*a, **k):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("database is locked")
+            return real(*a, **k)
+
+        db.list_reminders = flaky
+        old_tick, reminders.TICK = reminders.TICK, 0.01
+
+        async def go():
+            async def send(*_):
+                pass
+            t = asyncio.create_task(reminders.reminder_loop(db, send))
+            await asyncio.sleep(0.1)
+            t.cancel()
+
+        try:
+            asyncio.run(go())
+        finally:
+            reminders.TICK = old_tick
+        self.assertGreater(calls["n"], 3)                           # kept checking after the error
+        self.assertIn("locked", reminders.STATE["last_error"])
+        self.assertIn("last check", reminders.heartbeat_text())
+
+    def test_spawned_task_is_not_garbage_collected(self):
+        import asyncio
+        import gc
+        from bot.tasks import spawn
+        done = []
+
+        async def job():
+            await asyncio.sleep(0.05)
+            done.append(True)
+
+        async def go():
+            spawn(job(), "test")            # deliberately not keeping a reference
+            gc.collect()
+            await asyncio.sleep(0.1)
+
+        asyncio.run(go())
+        self.assertEqual(done, [True])

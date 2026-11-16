@@ -7,6 +7,7 @@ from bot import config
 from bot.db import DB
 from bot.ks_api import KingshotAPI
 from bot.redeemer import Redeemer
+from bot.tasks import spawn
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("main")
@@ -31,7 +32,7 @@ async def main():
 
     runner = await start_web(redeemer, bot)
     log.info("Website on port %s, public address %s", config.WEB_PORT, config.PUBLIC_URL)
-    scheduler = asyncio.create_task(redeemer.scheduler())
+    scheduler = spawn(redeemer.scheduler(), "gift-codes")
     try:
         await bot.start(config.DISCORD_TOKEN)
     finally:

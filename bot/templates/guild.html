@@ -137,7 +137,10 @@
 <!-- ================= TIMELINE ================= -->
 <section class="tab" id="tab-timeline">
   <div class="card">
-    <h2>Next 7 days</h2>
+    <div class="row" style="margin:0 0 12px;justify-content:space-between">
+      <h2 style="margin:0">Next 7 days</h2>
+      <span class="muted">Reminder checker: {{ heartbeat }}</span>
+    </div>
     {% if days %}
     <div class="timeline">
       {% for day, events in days.items() %}

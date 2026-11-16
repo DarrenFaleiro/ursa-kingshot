@@ -21,10 +21,11 @@ from markupsafe import Markup
 
 from . import config
 from .redeemer import Redeemer
+from .tasks import spawn
 from . import access as acl
 from .kvk import compare as kvk_compare, fmt as fmt_power, parse_players
 from .plans import PLAN_KINDS, render_plan, validate as validate_plan
-from .reminders import KINDS, next_occurrence, parse_before, parse_when, timeline
+from .reminders import KINDS, heartbeat_text, next_occurrence, parse_before, parse_when, timeline
 
 COOKIE = "ks_session"
 STATE_COOKIE = "ks_oauth_state"
@@ -72,6 +73,7 @@ def create_app(redeemer: Redeemer, bot) -> web.Application:
         ctx["public_url"] = config.PUBLIC_URL
         ctx["bot_name"] = config.BOT_NAME
         ctx["request_path"] = request.path if request else ""
+        ctx["heartbeat"] = heartbeat_text()
         ctx["is_owner"] = bool(ctx["me"] and bot.is_owner(int(ctx["me"]["user_id"])))
         ctx["kinds"] = KINDS
         ctx["sections"] = acl.SECTIONS
@@ -230,7 +232,7 @@ def create_app(redeemer: Redeemer, bot) -> web.Application:
                                             f"web:{s['username']}", form.get("name"),
                                             guild_id=gid, discord_user_id=s["user_id"])
         if ok:
-            asyncio.create_task(redeemer.run(fids=[form.get("fid", "").strip()]))
+            spawn(redeemer.run(fids=[form.get("fid", "").strip()]))
         raise back("/", msg.replace("**", "").replace("`", ""), err=not ok)
 
     @routes.post("/me/players/{fid}/delete")
@@ -316,7 +318,7 @@ def create_app(redeemer: Redeemer, bot) -> web.Application:
                                                 parts[2] if len(parts) > 2 else None, guild_id=gid)
             (added if ok else failed).append(parts[0] if ok else msg.replace("`", ""))
         if added:
-            asyncio.create_task(redeemer.run(fids=added))
+            spawn(redeemer.run(fids=added))
         raise back(f"/g/{gid}", f"Added {len(added)} player(s)." + (" Problems: " + " ".join(failed) if failed else ""),
                    err=bool(failed), tab="players")
 
@@ -633,7 +635,7 @@ def create_app(redeemer: Redeemer, bot) -> web.Application:
         require_any_manager(request)
         code = (await request.post()).get("code", "").strip()
         if redeemer.add_code(code, f"web:{request['session']['username']}"):
-            asyncio.create_task(redeemer.run(codes=[code]))
+            spawn(redeemer.run(codes=[code]))
             raise back("/codes", f"Code {code} added - redeeming in the background")
         raise back("/codes", "Code already exists or was empty", err=True)
 
@@ -666,7 +668,7 @@ def create_app(redeemer: Redeemer, bot) -> web.Application:
         async def job():
             await redeemer.check_feed()
             await redeemer.run()
-        asyncio.create_task(job())
+        spawn(job())
         raise back("/codes", "Redemption run started - refresh in a minute")
 
     app = web.Application(middlewares=[auth])

@@ -149,23 +149,51 @@ def build_alert(rem, occ: int, minutes_before: int) -> dict:
 Sender = Callable[[object, int, int], Awaitable[bool]]   # (reminder_row, occurrence, minutes_before)
 
 
+# Heartbeat so /status and the website can show the checker is alive.
+STATE = {"started": None, "last_tick": None, "sent": 0, "last_error": None}
+
+
+async def run_due(db: DB, send: Sender, now: float) -> int:
+    """One pass: send every alert that's due right now. Returns how many were sent."""
+    sent = 0
+    for rem in db.list_reminders(only_enabled=True):
+        try:
+            alerts = due_alerts(rem, now)
+            for fire, occ, before in alerts:
+                await send(rem, occ, before)
+                sent += 1
+            if alerts:
+                db.update_reminder(rem["id"], last_fire_ts=alerts[-1][0])
+            # one-off reminder that has fully passed -> switch it off
+            if int(rem["repeat_minutes"]) == 0 and now > int(rem["start_at"]) + GRACE:
+                db.update_reminder(rem["id"], enabled=0)
+        except Exception as e:
+            STATE["last_error"] = f"reminder {rem['id']}: {e}"
+            log.exception("reminder %s failed", rem["id"])
+    return sent
+
+
 async def reminder_loop(db: DB, send: Sender):
-    """Runs forever. `send` is provided by the Discord bot."""
+    """Runs forever. Survives any error: it logs it and carries on with the next check."""
+    STATE["started"] = time.time()
+    log.info("Reminder checker started (every %ss)", TICK)
     while True:
-        now = time.time()
-        for rem in db.list_reminders(only_enabled=True):
-            try:
-                alerts = due_alerts(rem, now)
-                for fire, occ, before in alerts:
-                    await send(rem, occ, before)
-                if alerts:
-                    db.update_reminder(rem["id"], last_fire_ts=alerts[-1][0])
-                # one-off reminder that has fully passed -> switch it off
-                if int(rem["repeat_minutes"]) == 0 and now > int(rem["start_at"]) + GRACE:
-                    db.update_reminder(rem["id"], enabled=0)
-            except Exception:
-                log.exception("reminder %s failed", rem["id"])
+        try:
+            STATE["sent"] += await run_due(db, send, time.time())
+        except Exception as e:      # e.g. database briefly locked - never let the loop die
+            STATE["last_error"] = str(e)
+            log.exception("reminder check failed")
+        STATE["last_tick"] = time.time()
         await asyncio.sleep(TICK)
+
+
+def heartbeat_text(now: float | None = None) -> str:
+    now = now or time.time()
+    if not STATE["last_tick"]:
+        return "not started yet"
+    ago = int(now - STATE["last_tick"])
+    status = "✅" if ago <= TICK * 3 else "⚠️ stalled"
+    return f"{status} last check {ago}s ago · {STATE['sent']} alerts sent since start"
 
 
 def timeline(reminders, now: float, days: int = 7) -> list[dict]:

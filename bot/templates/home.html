@@ -77,7 +77,8 @@
     <div class="stat"><b><span class="pill {{ 'ok' if salt == 'ok' else 'bad' }}">{{ salt }}</span></b><span class="muted">gift-code site</span></div>
     <div class="stat"><b>{{ "Running" if running else "Idle" }}</b><span class="muted">{% if next_run %}next check {{ next_run|countdown }}{% endif %}</span></div>
   </div>
-  <p class="muted">Last run:</p><pre>{{ last }}</pre>
+  <p class="muted">Reminder checker: {{ heartbeat }}</p>
+  <p class="muted">Last gift-code run:</p><pre>{{ last }}</pre>
   {% if unassigned %}
   <p class="muted" style="margin-top:12px">⚠️ {{ unassigned|length }} player(s) from the old single-server version have no server.
     They still get codes. Re-add them in the right server so they show up there.</p>

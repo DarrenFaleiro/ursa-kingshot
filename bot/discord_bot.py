@@ -11,11 +11,13 @@ from discord import app_commands
 
 from . import config
 from .redeemer import Redeemer
+from .tasks import spawn
 from . import access as acl
 from .alert_card import render_card
 from .kvk import compare as kvk_compare, fmt as fmt_power
 from .plans import PLAN_KINDS, render_plan
-from .reminders import KINDS, build_alert, next_occurrence, parse_before, parse_when, reminder_loop
+from .reminders import (KINDS, build_alert, heartbeat_text, next_occurrence, parse_before, parse_when,
+                        reminder_loop)
 
 log = logging.getLogger("discord")
 ROLE_BUTTON_PREFIX = "ksrole:"
@@ -58,8 +60,13 @@ class KingshotBot(discord.Client):
 
         async def start_reminders():
             await self.wait_until_ready()      # channels aren't known until the bot is connected
-            await reminder_loop(self.db, self.send_reminder)
-        asyncio.create_task(start_reminders())
+            while True:                        # reminder_loop never returns; this is a last-resort guard
+                try:
+                    await reminder_loop(self.db, self.send_reminder)
+                except Exception:
+                    log.exception("Reminder checker stopped - restarting in 10s")
+                    await asyncio.sleep(10)
+        self.reminder_task = spawn(start_reminders(), "reminders")
         log.info("Slash commands synced")
 
     async def on_ready(self):
@@ -456,7 +463,7 @@ def register_commands(bot: KingshotBot):
         ok, msg = await r.add_player(player_id, kingdom, f"discord:{inter.user}", name,
                                      guild_id=inter.guild_id, discord_user_id=inter.user.id)
         if ok:
-            asyncio.create_task(r.run(fids=[player_id.strip()]))
+            spawn(r.run(fids=[player_id.strip()]))
             msg += " Redeeming active codes for it now."
         await inter.followup.send(msg, ephemeral=True)
 
@@ -502,6 +509,7 @@ def register_commands(bot: KingshotBot):
         if r.next_run_at:
             e.add_field(name="Next code check", value=f"<t:{int(r.next_run_at)}:R>")
         e.add_field(name="Gift-code site", value=r.salt_status)
+        e.add_field(name="Reminder checker", value=heartbeat_text(), inline=False)
         e.add_field(name="Website", value=config.PUBLIC_URL, inline=False)
         await inter.response.send_message(embed=e)
 
@@ -640,7 +648,7 @@ def register_commands(bot: KingshotBot):
             return await inter.response.send_message("That code is already saved.", ephemeral=True)
         await inter.response.send_message(f"✅ Added `{code}`. Redeeming - results go to the report channel.",
                                           ephemeral=True)
-        asyncio.create_task(r.run(codes=[code.strip()]))
+        spawn(r.run(codes=[code.strip()]))
 
     @code_group.command(name="redeem-now", description="Check for new codes and redeem everything now")
     @managers_only()
@@ -653,7 +661,7 @@ def register_commands(bot: KingshotBot):
         async def job():
             await r.check_feed()
             await r.run()
-        asyncio.create_task(job())
+        spawn(job())
 
     @code_group.command(name="check-salt", description="Test the connection to the gift-code website")
     @managers_only()
