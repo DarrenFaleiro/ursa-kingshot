@@ -88,3 +88,71 @@ def compare(ours: list[dict], theirs: list[dict], top_n: int = 10) -> dict:
         verdict, mood = f"They're much stronger at the top ({ratio:.2f}×). Shield up, defend, pick targets carefully.", "bad"
     return {"ours": a, "theirs": b, "pairs": pairs, "wins": wins, "n": n, "ratio": ratio,
             "verdict": verdict, "mood": mood}
+
+
+# ---------------------------------------------------------------------------
+# Preparation days, results and the kingdom's KvK record (all entered by officers)
+# ---------------------------------------------------------------------------
+PREP_DAYS = 5
+DAY_NAMES = ["Day I", "Day II", "Day III", "Day IV", "Day V"]
+
+
+def parse_prep(form_values: list[tuple[str, str]]) -> list[list[int | None]]:
+    """[(ours_text, theirs_text) x5] -> [[ours, theirs] x5], None where not entered."""
+    out = []
+    for ours, theirs in form_values[:PREP_DAYS]:
+        out.append([parse_power(ours) if (ours or "").strip() else None,
+                    parse_power(theirs) if (theirs or "").strip() else None])
+    while len(out) < PREP_DAYS:
+        out.append([None, None])
+    return out
+
+
+def prep_summary(prep: list, prep_result: str = "auto") -> dict:
+    """Totals, lead %, per-day winners and the preparation result."""
+    days, won, lost, entered = [], 0, 0, 0
+    tot_o = tot_t = 0
+    for i, pair in enumerate((prep or [])[:PREP_DAYS]):
+        o, t = (pair + [None, None])[:2] if isinstance(pair, list) else (None, None)
+        done = o is not None and t is not None
+        if done:
+            entered += 1
+            tot_o += o
+            tot_t += t
+            won += o > t
+            lost += t > o
+        days.append({"name": DAY_NAMES[i], "ours": o, "theirs": t, "done": done,
+                     "lead": ((o / t - 1) * 100) if done and t else None,
+                     "share": (o / (o + t) * 100) if done and (o + t) else 50})
+    while len(days) < PREP_DAYS:
+        days.append({"name": DAY_NAMES[len(days)], "ours": None, "theirs": None, "done": False, "lead": None, "share": 50})
+    if prep_result in ("won", "lost"):
+        result = prep_result
+    elif entered == PREP_DAYS:
+        result = "won" if won > lost else "lost" if lost > won else "tie"
+    elif won >= 3 or lost >= 3:
+        result = "won" if won >= 3 else "lost"
+    else:
+        result = "pending"
+    return {"days": days, "ours": tot_o, "theirs": tot_t, "won": won, "lost": lost, "entered": entered,
+            "lead": ((tot_o / tot_t - 1) * 100) if tot_t else None,
+            "share": (tot_o / (tot_o + tot_t) * 100) if (tot_o + tot_t) else 50, "result": result}
+
+
+def kingdom_record(kvks: list[dict]) -> dict:
+    """Win rates over every saved KvK (oldest -> newest in 'recent')."""
+    prep_w = prep_l = castle_w = castle_l = 0
+    recent = []
+    for k in sorted(kvks, key=lambda x: (x["data"].get("kvk_date") or "", x["id"])):
+        d = k["data"]
+        p = prep_summary(d.get("prep") or [], d.get("prep_result", "auto"))["result"]
+        c = d.get("castle_result", "pending")
+        prep_w += p == "won"
+        prep_l += p == "lost"
+        castle_w += c == "won"
+        castle_l += c == "lost"
+        recent.append({"id": k["id"], "title": k["title"], "prep": p, "castle": c, "date": d.get("kvk_date")})
+    rate = lambda w, l: round(100 * w / (w + l)) if (w + l) else None
+    return {"prep_w": prep_w, "prep_l": prep_l, "castle_w": castle_w, "castle_l": castle_l,
+            "prep_rate": rate(prep_w, prep_l), "castle_rate": rate(castle_w, castle_l),
+            "played": len(recent), "recent": recent[-10:]}

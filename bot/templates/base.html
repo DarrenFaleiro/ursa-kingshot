@@ -206,10 +206,50 @@
   .tl-body { flex:1; padding-top:2px; }
   .tl-time { color:var(--c); font-weight:600; font-size:14px; }
 
+  /* kingdom unlocks */
+  .unlock-grid { display:grid; gap:18px; grid-template-columns:minmax(0, 1.4fr) minmax(0, 1fr); align-items:start; }
+  .unlock-main { display:grid; gap:18px; }
+  .unlock-side { display:grid; gap:18px; position:sticky; top:80px; }
+  @media (max-width:900px){ .unlock-grid { grid-template-columns:minmax(0, 1fr); } .unlock-side { position:static; } }
+  .chips { display:flex; gap:10px; flex-wrap:wrap; }
+  .chip { cursor:pointer; margin:0; position:relative; }
+  .chip input { position:absolute; opacity:0; pointer-events:none; width:1px; height:1px; padding:0; border:0; }
+  .chip span { display:inline-flex; align-items:center; gap:6px; padding:9px 16px; border-radius:12px; font-weight:600;
+               border:2px solid color-mix(in srgb, var(--c, var(--accent)) 55%, transparent); color:var(--text);
+               background:color-mix(in srgb, var(--c, var(--accent)) 8%, transparent); transition:.15s; }
+  .chip input:checked + span { background:color-mix(in srgb, var(--c, var(--accent)) 28%, transparent);
+               border-color:var(--c, var(--accent)); box-shadow:0 0 0 3px color-mix(in srgb, var(--c, var(--accent)) 20%, transparent); }
+  .chip input:not(:checked) + span { opacity:.55; }
+  .chip.big span { flex-direction:column; min-width:96px; padding:12px 14px; }
+  .chip.big b { font-size:24px; line-height:1.1; } .chip.big small { font-weight:500; color:var(--muted); font-size:12px; }
+  .chip input:focus-visible + span { outline:2px solid var(--accent); }
+
   /* KvK */
   .verdict.good { border-left:5px solid var(--ok); }
   .verdict.warn { border-left:5px solid #ff9f0a; }
   .verdict.bad { border-left:5px solid var(--bad); }
+  .kvk-hero { background:linear-gradient(90deg, rgba(64,156,255,.18), var(--glass) 45%, var(--glass) 55%, rgba(255,77,94,.18)); }
+  .kvk-vs { display:grid; grid-template-columns:1fr auto 1fr; align-items:center; text-align:center; gap:10px; }
+  .kvk-num { font-size:clamp(34px, 7vw, 64px); font-weight:900; letter-spacing:-.02em; line-height:1; }
+  .ours { color:#409cff; } .theirs { color:#ff4d5e; }
+  .kvk-vs-word { color:#ffcc00; font-weight:900; font-size:28px; }
+  .kvk-bar { position:relative; height:10px; border-radius:5px; background:#ff4d5e; margin:18px auto 0; max-width:620px; }
+  .kvk-bar.thin { height:6px; margin:10px 0 6px; max-width:none; }
+  .kvk-bar i { display:block; height:100%; border-radius:5px 0 0 5px; background:#409cff; }
+  .kvk-bar b { position:absolute; top:-4px; width:4px; height:18px; border-radius:2px; background:#fff; transform:translateX(-2px); }
+  .kvk-total { font-size:clamp(26px, 5vw, 40px); font-weight:900; letter-spacing:-.02em; }
+  .kvk-days { display:grid; gap:12px; grid-template-columns:repeat(5, minmax(0, 1fr)); margin-top:14px; }
+  @media (max-width:900px){ .kvk-days { grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); } }
+  .kvk-days .stat b { display:inline; font-size:15px; letter-spacing:0; }
+  .kvk-days .stat .row b { font-size:16px; font-weight:800; }
+  .ring { --pct:0; width:120px; height:120px; border-radius:50%; display:grid; place-items:center;
+          background:conic-gradient(#409cff calc(var(--pct) * 1%), var(--field) 0); }
+  .ring > div { width:96px; height:96px; border-radius:50%; background:var(--bg); display:grid; place-items:center; align-content:center; }
+  .ring b { font-size:24px; } .ring span { color:var(--muted); font-size:13px; }
+  .res { width:28px; height:28px; border-radius:8px; display:grid; place-items:center; font-size:12px; font-weight:800;
+         background:var(--field); color:var(--muted); }
+  .res.won { background:color-mix(in srgb, var(--ok) 25%, transparent); color:var(--ok); }
+  .res.lost { background:color-mix(in srgb, var(--bad) 22%, transparent); color:var(--bad); }
   .bar { height:6px; border-radius:3px; background:var(--field); margin-top:6px; overflow:hidden; }
   .bar i { display:block; height:100%; border-radius:3px; }
   table.duel td { vertical-align:top; }

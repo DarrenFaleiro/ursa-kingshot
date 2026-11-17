@@ -14,7 +14,8 @@ from .redeemer import Redeemer
 from .tasks import spawn
 from . import access as acl
 from .alert_card import render_card
-from .kvk import compare as kvk_compare, fmt as fmt_power
+from .kvk import compare as kvk_compare, fmt as fmt_power, kingdom_record, prep_summary
+from .kvk_card import render_kvk
 from .plans import PLAN_KINDS, render_plan
 from .reminders import (KINDS, build_alert, heartbeat_text, next_occurrence, parse_before, parse_when,
                         reminder_loop)
@@ -62,7 +63,7 @@ class KingshotBot(discord.Client):
             await self.wait_until_ready()      # channels aren't known until the bot is connected
             while True:                        # reminder_loop never returns; this is a last-resort guard
                 try:
-                    await reminder_loop(self.db, self.send_reminder)
+                    await reminder_loop(self.db, self.send_reminder, self.send_unlock)
                 except Exception:
                     log.exception("Reminder checker stopped - restarting in 10s")
                     await asyncio.sleep(10)
@@ -369,20 +370,30 @@ class KingshotBot(discord.Client):
 
     def kvk_embed(self, k: dict) -> discord.Embed:
         d = k["data"]
-        r = kvk_compare(d["ours"], d["theirs"], int(d.get("top_n") or 10))
+        r = kvk_compare(d.get("ours", []), d.get("theirs", []), int(d.get("top_n") or 10))
+        prep = prep_summary(d.get("prep") or [], d.get("prep_result", "auto"))
         colour = {"good": 0x30D158, "warn": 0xFF9F0A, "bad": 0xFF453A}.get(r["mood"], 0x8E8E93)
         e = discord.Embed(title=f"⚔️ #{d.get('our_kingdom') or '?'} vs #{d.get('their_kingdom') or '?'} · {k['title']}",
-                          description=r["verdict"], colour=colour)
-        e.add_field(name=f"Our top {r['n']}", value=fmt_power(r["ours"]["top_total"]))
-        e.add_field(name=f"Their top {r['n']}", value=fmt_power(r["theirs"]["top_total"]))
-        e.add_field(name="Matchups won", value=f"{r['wins']}/{r['n']}")
+                          description=r["verdict"] if r["n"] else None, colour=colour)
+        if prep["entered"]:
+            lead = prep["lead"]
+            e.add_field(name="Preparation", inline=False, value=(
+                f"**{fmt_power(prep['ours'])}** vs {fmt_power(prep['theirs'])}"
+                + (f" · you lead **{lead:+.1f}%**" if lead is not None and lead >= 0 else "")
+                + f" · {prep['won']}/{prep['entered']} days won · **{prep['result']}**"
+                + (f" · castle **{d.get('castle_result')}**" if d.get("castle_result") in ("won", "lost") else "")))
+        if r["n"]:
+            e.add_field(name=f"Our top {r['n']}", value=fmt_power(r["ours"]["top_total"]))
+        if r["n"]:
+            e.add_field(name=f"Their top {r['n']}", value=fmt_power(r["theirs"]["top_total"]))
+            e.add_field(name="Matchups won", value=f"{r['wins']}/{r['n']}")
         rows = []
         for m in r["pairs"][:15]:
             o, t = m["ours"], m["theirs"]
             sign = "🟢" if m["diff"] > 0 else "🔴" if m["diff"] < 0 else "⚪"
             rows.append(f"`{m['rank']:>2}` {sign} **{(o or {}).get('name', '-')}** {fmt_power((o or {}).get('power', 0))}"
                         f" vs {(t or {}).get('name', '-')} {fmt_power((t or {}).get('power', 0))}")
-        if rows:
+        if rows and r["n"]:
             e.add_field(name="Rank by rank", value="\n".join(rows)[:1024], inline=False)
         if d.get("notes"):
             e.add_field(name="Notes", value=d["notes"][:1024], inline=False)
@@ -394,11 +405,46 @@ class KingshotBot(discord.Client):
         channel = self._channel_in(guild_id, channel_id)
         if not k or not channel:
             return "Comparison or channel not found."
+        d = k["data"]
+        png = await asyncio.to_thread(render_kvk, d, prep_summary(d.get("prep") or [], d.get("prep_result", "auto")),
+                                      kingdom_record(self.db.list_kvk(guild_id)), config.BOT_NAME,
+                                      urlparse(config.PUBLIC_URL).netloc)
+        embed = self.kvk_embed(k)
+        embed.set_image(url="attachment://kvk.png")
         try:
-            await channel.send(embed=self.kvk_embed(k))
+            await channel.send(embed=embed, files=[discord.File(io.BytesIO(png), filename="kvk.png")])
         except discord.HTTPException:
             return "I can't post in that channel - check my permissions."
         return f"Posted in #{channel.name}"
+
+    async def send_unlock(self, guild_id, settings: dict, unlock: dict, lead: int, test: bool = False) -> bool:
+        """Post a kingdom unlock reminder: embed + countdown card, optional role ping."""
+        from .unlocks import card_for, message_for
+        channel = self._channel_in(guild_id, settings.get("channel_id"))
+        if not channel:
+            self.db.log("Unlock reminder: channel not found - check Unlocks settings", guild_id)
+            return False
+        r, g, b = unlock["color"]
+        embed = discord.Embed(title=("🧪 TEST · " if test else "") + f"{unlock['emoji']} Next unlock: {unlock['title']}",
+                              description=message_for(unlock, lead, settings.get("kingdom")),
+                              colour=(r << 16) + (g << 8) + b,
+                              timestamp=datetime.fromtimestamp(unlock["start"], timezone.utc))
+        embed.set_footer(text=f"{config.BOT_NAME} · Kingdom timeline · dates are community estimates")
+        files = []
+        png = await asyncio.to_thread(render_card, card_for(unlock, settings.get("kingdom")),
+                                      urlparse(config.PUBLIC_URL).netloc, config.BOT_NAME)
+        if png:
+            files = [discord.File(io.BytesIO(png), filename="unlock.png")]
+            embed.set_image(url="attachment://unlock.png")
+        role = settings.get("role_id")
+        try:
+            await channel.send(content=f"<@&{role}>" if role else None, embed=embed, files=files,
+                               allowed_mentions=discord.AllowedMentions(roles=True, users=False, everyone=False))
+            return True
+        except discord.HTTPException as e:
+            log.warning("unlock post failed: %s", e)
+            self.db.log("Unlock reminder could not be posted (check channel permissions)", guild_id)
+            return False
 
     async def report_new_codes(self, codes: list[str]):
         text = "🎁 New gift code(s): " + ", ".join(f"`{c}`" for c in codes) + " - redeeming now."
@@ -526,7 +572,7 @@ def register_commands(bot: KingshotBot):
             "`/reminder add` · `edit` · `pause` · `resume` · `test` · `remove` · `rolebuttons`\n"
             "`/code add` · `/code redeem-now` · `/code check-salt`"))
         e.add_field(name="Plans, KvK & timeline", inline=False, value=(
-            "`/timeline` · `/plan list|show|post` · `/kvk list|show|post` · `/claims`"))
+            "`/timeline` · `/unlocks next|setup|off` · `/plan list|show|post` · `/kvk list|show|post` · `/claims`"))
         e.add_field(name="Admins", inline=False, value="`/access grant|list` officer access · `/privacy`")
         e.add_field(name="Owner", inline=False, value="`/code remove` · `/code retry`")
         e.set_footer(text="Times are UTC (Kingshot game time).")
@@ -1031,3 +1077,64 @@ def register_commands(bot: KingshotBot):
         await inter.response.send_message(msg, ephemeral=True)
 
     tree.add_command(kvk_grp)
+
+    # ---------- /unlocks (kingdom unlock reminders) ----------
+    unl = app_commands.Group(name="unlocks", description="Kingdom unlock reminders (heroes, pets, Truegold…)",
+                             guild_only=True)
+
+    @unl.command(name="next", description="What your kingdom unlocks next")
+    async def unlocks_next(inter: discord.Interaction):
+        from . import unlocks as ul
+        s = db.unlock_settings(inter.guild_id)
+        if not s.get("open_date"):
+            return await inter.response.send_message(
+                "Not set up yet - use `/unlocks setup` or the website's Unlocks tab.", ephemeral=True)
+        rows = [u for u in ul.unlock_list(s["open_date"]) if not u["passed"]][:8]
+        lines = [f"{u['emoji']} **{u['title']}** - " + ("**now**" if u["live"] else f"<t:{u['start']}:D> (<t:{u['start']}:R>)")
+                 for u in rows]
+        e = discord.Embed(title=f"Kingdom #{s.get('kingdom') or '?'} · day {ul.kingdom_day(s['open_date'])}",
+                          description="\n".join(lines) or "Everything in the schedule has unlocked.", colour=0xFF9F0A)
+        e.set_footer(text="Dates are community estimates - confirm in game")
+        await inter.response.send_message(embed=e, ephemeral=True)
+
+    @unl.command(name="setup", description="Turn on unlock reminders for this server")
+    @app_commands.describe(channel="Where to post", kingdom="Your kingdom number",
+                           current_day="Today's kingdom day (from your kingdom info in game)",
+                           open_date="Or: the kingdom open date, YYYY-MM-DD", role="Role to ping (optional)")
+    async def unlocks_setup(inter: discord.Interaction, channel: discord.TextChannel, kingdom: str,
+                            current_day: int | None = None, open_date: str | None = None,
+                            role: discord.Role | None = None):
+        from . import unlocks as ul
+        if not await need(inter, "reminders", 2):
+            return
+        s = db.unlock_settings(inter.guild_id)
+        if current_day is not None:
+            s["open_date"] = ul.open_date_from_day(current_day)
+        elif open_date:
+            try:
+                ul.open_ts(open_date)
+                s["open_date"] = open_date
+            except ValueError:
+                return await inter.response.send_message("Open date must be YYYY-MM-DD.", ephemeral=True)
+        if not s.get("open_date"):
+            return await inter.response.send_message("Give `current_day` or `open_date`.", ephemeral=True)
+        s.update(enabled=True, channel_id=str(channel.id), kingdom=kingdom.lstrip("#")[:8],
+                 role_id=str(role.id) if role else s.get("role_id"))
+        db.save_unlock_settings(inter.guild_id, s)
+        nxt = ul.next_unlock(s)
+        await inter.response.send_message(
+            f"✅ Unlock reminders on in {channel.mention} for kingdom #{s['kingdom']} "
+            f"(day {ul.kingdom_day(s['open_date'])})."
+            + (f" Next: **{nxt['title']}** <t:{nxt['start']}:R>." if nxt else "")
+            + "\nChoose how many days before, and which kinds, on the website's Unlocks tab.", ephemeral=True)
+
+    @unl.command(name="off", description="Turn unlock reminders off")
+    async def unlocks_off(inter: discord.Interaction):
+        if not await need(inter, "reminders", 2):
+            return
+        s = db.unlock_settings(inter.guild_id)
+        s["enabled"] = False
+        db.save_unlock_settings(inter.guild_id, s)
+        await inter.response.send_message("Unlock reminders are off.", ephemeral=True)
+
+    tree.add_command(unl)

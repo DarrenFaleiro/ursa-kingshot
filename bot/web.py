@@ -23,8 +23,10 @@ from . import config
 from .redeemer import Redeemer
 from .tasks import spawn
 from . import access as acl
-from .kvk import compare as kvk_compare, fmt as fmt_power, parse_players
+from .kvk import compare as kvk_compare, fmt as fmt_power, kingdom_record, parse_players, parse_prep, prep_summary
+from .kvk_card import render_kvk
 from .plans import PLAN_KINDS, render_plan, validate as validate_plan
+from . import unlocks as ul
 from .reminders import KINDS, heartbeat_text, next_occurrence, parse_before, parse_when, timeline
 
 COOKIE = "ks_session"
@@ -291,14 +293,28 @@ def create_app(redeemer: Redeemer, bot) -> web.Application:
         if kvks:
             want = request.query.get("kvk")
             sel_kvk = next((k for k in kvks if str(k["id"]) == want), kvks[0])
-            sel_kvk = dict(sel_kvk, result=kvk_compare(sel_kvk["data"]["ours"], sel_kvk["data"]["theirs"],
-                                                        int(sel_kvk["data"].get("top_n") or 10)))
+            sel_kvk = dict(sel_kvk, result=kvk_compare(sel_kvk["data"].get("ours", []), sel_kvk["data"].get("theirs", []),
+                                                        int(sel_kvk["data"].get("top_n") or 10)),
+                           prep=prep_summary(sel_kvk["data"].get("prep") or [], sel_kvk["data"].get("prep_result", "auto")))
+        kvk_rec = kingdom_record(kvks) if kvks else None
+        next_kvk_ts = None
+        nk = settings["prefs"].get("next_kvk")
+        if nk:
+            try:
+                next_kvk_ts = int(datetime.strptime(nk, "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc).timestamp())
+            except ValueError:
+                next_kvk_ts = None
 
+        unlock = db.unlock_settings(gid)
+        unlock_rows = ul.unlock_list(unlock["open_date"], now) if unlock.get("open_date") else []
+        unlock_info = {"settings": unlock, "rows": unlock_rows,
+                       "day": ul.kingdom_day(unlock["open_date"], now) if unlock.get("open_date") else None,
+                       "next": ul.next_unlock(unlock, now)}
         auto_defaults = {k: dict(zip(("channel", "role"), bot.auto_defaults(gid, k))) for k in KINDS}
-        return render("guild.html", request, g=g, gid=gid, p=p, players=players, checklist=checklist,
+        return render("guild.html", request, unlock=unlock_info, unlock_cats=ul.CATEGORIES, lead_choices=ul.LEAD_CHOICES, g=g, gid=gid, p=p, players=players, checklist=checklist,
                       auto_done=auto_done, auto_defaults=auto_defaults, reminders=reminders, codes=codes,
                       settings=settings, days=days, claims=claims, log=log, plans=plans, kvks=kvks,
-                      sel_kvk=sel_kvk, grants=db.list_grants(gid) if p["access"] else [],
+                      sel_kvk=sel_kvk, kvk_rec=kvk_rec, next_kvk_ts=next_kvk_ts, grants=db.list_grants(gid) if p["access"] else [],
                       channels=bot.guild_channels(gid), roles=bot.guild_roles(gid), now=now,
                       today=datetime.now(timezone.utc).strftime("%Y-%m-%d"))
 
@@ -470,6 +486,76 @@ def create_app(redeemer: Redeemer, bot) -> web.Application:
         msg = await bot.post_role_panel(gid, form.get("channel_id") or 0)
         raise back(f"/g/{gid}", msg, err=not msg.startswith("Role buttons posted"), tab="reminders")
 
+    # ---------- kingdom unlock reminders ----------
+    def _unlock_from_form(form, current: dict) -> dict:
+        data = dict(current)
+        data["enabled"] = form.get("enabled") == "on"
+        data["channel_id"] = form.get("channel_id") or None
+        data["role_id"] = form.get("role_id") or None
+        data["kingdom"] = (form.get("kingdom") or "").strip().lstrip("#")[:8]
+        if form.get("start_mode") == "day" and (form.get("current_day") or "").strip().isdigit():
+            data["open_date"] = ul.open_date_from_day(int(form.get("current_day")))
+        elif form.get("open_date"):
+            try:
+                datetime.strptime(form.get("open_date"), "%Y-%m-%d")
+                data["open_date"] = form.get("open_date")
+            except ValueError:
+                pass
+        leads = [int(x) for x in form.getall("leads", []) if str(x).isdigit() and int(x) in ul.LEAD_CHOICES]
+        data["leads"] = sorted(set(leads), reverse=True) or [1]
+        cats = [c for c in form.getall("categories", []) if c in ul.CATEGORIES]
+        data["categories"] = cats or list(ul.CATEGORIES)
+        return data
+
+    @routes.post("/g/{gid}/unlocks/save")
+    async def g_unlocks_save(request):
+        gid, _p = await require(request, "reminders", 2)
+        data = _unlock_from_form(await request.post(), db.unlock_settings(gid))
+        if data["enabled"] and not (data["channel_id"] and data["open_date"]):
+            raise back(f"/g/{gid}", "Pick a channel and your kingdom's open date (or current day) first",
+                       err=True, tab="unlocks")
+        db.save_unlock_settings(gid, data)
+        db.log(f"Unlock reminders {'on' if data['enabled'] else 'off'} (kingdom #{data['kingdom']}) "
+               f"by web:{request['session']['username']}", gid)
+        raise back(f"/g/{gid}", "Unlock reminders saved", tab="unlocks")
+
+    @routes.post("/g/{gid}/unlocks/test")
+    async def g_unlocks_test(request):
+        gid, _p = await require(request, "reminders", 2)
+        settings = db.unlock_settings(gid)
+        nxt = ul.next_unlock(settings)
+        if not nxt or not settings.get("channel_id"):
+            raise back(f"/g/{gid}", "Save a channel and open date first", err=True, tab="unlocks")
+        ok = await bot.send_unlock(gid, settings, nxt, (settings.get("leads") or [1])[0], test=True)
+        raise back(f"/g/{gid}", "Test posted - check the channel" if ok else "Couldn't post - check the bot's "
+                   "channel permissions", err=not ok, tab="unlocks")
+
+    @routes.get("/g/{gid}/unlocks/preview.png")
+    async def g_unlocks_preview(request):
+        """Live preview: uses the form's current values from the query string, else the saved settings."""
+        from .alert_card import render_card
+        gid, _p = await require(request, "overview", 1)
+        q = request.query
+        settings = dict(db.unlock_settings(gid))
+        if q.get("kingdom") is not None:
+            settings["kingdom"] = q.get("kingdom", "").lstrip("#")[:8]
+        if q.get("current_day", "").isdigit():
+            settings["open_date"] = ul.open_date_from_day(int(q["current_day"]))
+        elif q.get("open_date"):
+            try:
+                datetime.strptime(q["open_date"], "%Y-%m-%d")
+                settings["open_date"] = q["open_date"]
+            except ValueError:
+                pass
+        if q.get("categories") is not None:
+            settings["categories"] = [c for c in q.get("categories", "").split(",") if c in ul.CATEGORIES] or None
+        nxt = ul.next_unlock(settings) if settings.get("open_date") else None
+        if not nxt:   # nothing to show yet: an example card
+            nxt = ul.unlock_list(ul.open_date_from_day(252))[-4]
+        png = await asyncio.to_thread(render_card, ul.card_for(nxt, settings.get("kingdom")),
+                                      config.PUBLIC_URL.split("://")[-1], config.BOT_NAME)
+        return web.Response(body=png, content_type="image/png", headers={"Cache-Control": "no-store"})
+
     # ---------- privacy ----------
     @routes.post("/g/{gid}/privacy")
     async def g_privacy(request):
@@ -576,8 +662,17 @@ def create_app(redeemer: Redeemer, bot) -> web.Application:
             top_n = max(3, min(100, int(form.get("top_n") or 10)))
         except ValueError:
             top_n = 10
-        data = {"our_kingdom": (form.get("our_kingdom") or "").strip()[:12],
-                "their_kingdom": (form.get("their_kingdom") or "").strip()[:12],
+        prep = parse_prep([(form.get(f"prep_o{i}", ""), form.get(f"prep_t{i}", "")) for i in range(5)])
+        kvk_date = (form.get("kvk_date") or "").strip()
+        try:
+            datetime.strptime(kvk_date, "%Y-%m-%d")
+        except ValueError:
+            kvk_date = ""
+        data = {"our_kingdom": (form.get("our_kingdom") or "").strip().lstrip("#")[:12],
+                "their_kingdom": (form.get("their_kingdom") or "").strip().lstrip("#")[:12],
+                "kvk_date": kvk_date, "prep": prep,
+                "prep_result": form.get("prep_result") if form.get("prep_result") in ("auto", "won", "lost") else "auto",
+                "castle_result": form.get("castle_result") if form.get("castle_result") in ("pending", "won", "lost") else "pending",
                 "ours": ours[:200], "theirs": theirs[:200], "top_n": top_n,
                 "notes": (form.get("notes") or "").strip()[:500]}
         title = (form.get("title") or "").strip()[:60] or \
@@ -588,6 +683,32 @@ def create_app(redeemer: Redeemer, bot) -> web.Application:
         skipped = len(bad1) + len(bad2)
         raise back(f"/g/{gid}?kvk={kid}", f"Comparison saved" + (f" - {skipped} line(s) skipped (no power found)"
                                                                   if skipped else ""), err=bool(skipped), tab="kvk")
+
+    @routes.post("/g/{gid}/kvk/next")
+    async def g_kvk_next(request):
+        gid, _p = await require(request, "kvk", 2)
+        form = await request.post()
+        val = None
+        if form.get("date"):
+            try:
+                val = datetime.strptime(f"{form.get('date')} {form.get('time') or '00:00'}", "%Y-%m-%d %H:%M") \
+                    .strftime("%Y-%m-%d %H:%M")
+            except ValueError:
+                raise back(f"/g/{gid}", "Date must be a valid date", err=True, tab="kvk")
+        db.set_prefs(gid, next_kvk=val)
+        raise back(f"/g/{gid}", "Next KvK date saved" if val else "Next KvK date cleared", tab="kvk")
+
+    @routes.get("/g/{gid}/kvk/{kid}.png")
+    async def g_kvk_png(request):
+        gid, _p = await require(request, "kvk", 1)
+        k = db.get_kvk(int(request.match_info["kid"]), gid)
+        if not k:
+            raise web.HTTPNotFound()
+        d = k["data"]
+        png = await asyncio.to_thread(render_kvk, d, prep_summary(d.get("prep") or [], d.get("prep_result", "auto")),
+                                      kingdom_record(db.list_kvk(gid)), config.BOT_NAME,
+                                      config.PUBLIC_URL.split("://")[-1])
+        return web.Response(body=png, content_type="image/png", headers={"Cache-Control": "no-store"})
 
     @routes.post("/g/{gid}/kvk/{kid}/delete")
     async def g_kvk_delete(request):

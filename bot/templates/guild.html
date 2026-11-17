@@ -42,7 +42,8 @@
 
 <div class="tabs">
   <a href="#overview">Overview</a>
-  <a href="#timeline">Timeline</a>
+  <a href="#timeline">Schedule</a>
+  {% if p.reminders %}<a href="#unlocks">Unlocks</a>{% endif %}
   {% if p.reminders %}<a href="#reminders">Reminders · {{ reminders|length }}</a>{% endif %}
   {% if p.plans %}<a href="#plans">Battle plans</a>{% endif %}
   {% if p.kvk %}<a href="#kvk">KvK</a>{% endif %}
@@ -92,7 +93,8 @@
       {% else %}
         <div class="empty"><div class="big">⏰</div>No reminders yet.{% if p.reminders >= 2 %} <a href="#reminders">Add Bear Trap or Arena →</a>{% endif %}</div>
       {% endfor %}
-      <div class="row"><a href="#timeline" class="muted">Full 7-day timeline →</a></div>
+      <div class="row"><a href="#timeline" class="muted">Full 7-day schedule →</a></div>
+      {% if unlock.next %}<div class="row" style="margin-top:6px"><a href="#unlocks" class="muted">Next kingdom unlock: <b>{{ unlock.next.title }}</b> in {{ unlock.next.days_left }} days →</a></div>{% endif %}
     </div>
     <div class="card">
       <h2>Active gift codes</h2>
@@ -242,6 +244,107 @@
 </section>
 {% endif %}
 
+
+<!-- ================= KINGDOM UNLOCKS ================= -->
+{% if p.reminders %}
+{% set us = unlock.settings %}
+<section class="tab" id="tab-unlocks">
+  <div>
+    <h1 class="largetitle" style="font-size:26px">Kingdom unlock reminders</h1>
+    <p class="subtitle">Post your kingdom's upcoming unlocks in a Discord channel, before they happen.
+      {% if unlock.day is not none %}Kingdom #{{ us.kingdom or '?' }} is on <b>day {{ unlock.day }}</b>.{% endif %}</p>
+  </div>
+  <div class="unlock-grid">
+    <form method="post" action="/g/{{ gid }}/unlocks/save" id="unlockform" class="unlock-main">
+      <div class="card">
+        <div class="row" style="margin:0;justify-content:space-between">
+          <span><b>📢 Where</b><br><span class="muted">The channel to post in, and your kingdom.</span></span>
+          {% if p.reminders >= 2 %}<label class="switch" title="Reminders on/off"><input type="checkbox" name="enabled" {% if us.enabled %}checked{% endif %}><span></span></label>{% endif %}
+        </div>
+        <div class="fields">
+          <div><label>Channel</label><select name="channel_id"><option value="">- none -</option>
+            {% for c in channels %}<option value="{{ c.id }}" {% if us.channel_id == c.id|string %}selected{% endif %}>#{{ c.name }}</option>{% endfor %}</select></div>
+          <div><label>Kingdom #</label><input name="kingdom" value="{{ us.kingdom }}" inputmode="numeric" placeholder="e.g. 1844"></div>
+        </div>
+        <label>How old is your kingdom?</label>
+        <div class="modes" style="max-width:360px">
+          <button type="button" class="on" data-start-pick="date">Open date</button>
+          <button type="button" data-start-pick="day">Current day</button>
+        </div>
+        <input type="hidden" name="start_mode" value="date">
+        <div class="fields">
+          <div data-start="date"><label>Kingdom open date (UTC)</label><input type="date" name="open_date" value="{{ us.open_date or '' }}"></div>
+          <div data-start="day" style="display:none"><label>Today is kingdom day…</label>
+            <input name="current_day" inputmode="numeric" placeholder="e.g. 252" value="{{ unlock.day if unlock.day is not none else '' }}">
+            <div class="hint">Shown in game on your kingdom's info. We work out the open date for you.</div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <b>⏳ When</b><br><span class="muted">How long before each unlock to post. Reminders go out at 12:00 UTC on that day.</span>
+        <div class="chips" style="margin-top:12px">
+          {% for d in lead_choices %}
+          <label class="chip big"><input type="checkbox" name="leads" value="{{ d }}" {% if d in us.leads %}checked{% endif %}>
+            <span><b>{{ d if d else '🎯' }}</b><small>{{ ('day before' if d == 1 else 'days before') if d else 'On the day' }}</small></span></label>
+          {% endfor %}
+        </div>
+        <div class="hint">Pick as many as you like - e.g. a week before, the day before and on the day.</div>
+      </div>
+
+      <div class="card">
+        <div class="row" style="margin:0;justify-content:space-between">
+          <span><b>📦 What</b><br><span class="muted">Which kinds of unlock to announce.</span></span>
+          <button type="button" class="small" data-cats-all>All</button>
+        </div>
+        <div class="chips" style="margin-top:12px">
+          {% for k, c in unlock_cats.items() %}
+          <label class="chip" style="--c:rgb({{ c.color|join(',') }})"><input type="checkbox" name="categories" value="{{ k }}" {% if k in us.categories %}checked{% endif %}>
+            <span>{{ c.emoji }} {{ c.label }}</span></label>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="card">
+        <b>🔔 Ping a role</b><br><span class="muted">Mention a role with every reminder, so members get notified.</span>
+        <select name="role_id" style="margin-top:10px"><option value="">- no ping -</option>
+          {% for ro in roles %}<option value="{{ ro.id }}" {% if us.role_id == ro.id|string %}selected{% endif %}>@{{ ro.name }}</option>{% endfor %}</select>
+      </div>
+
+      {% if p.reminders >= 2 %}
+      <div class="row">
+        <button>Save</button>
+        <button type="submit" class="ghost" formaction="/g/{{ gid }}/unlocks/test" formnovalidate>Send test now</button>
+      </div>
+      {% endif %}
+    </form>
+
+    <aside class="unlock-side">
+      <div class="card">
+        <h2>Preview</h2>
+        <img id="unlockpreview" src="/g/{{ gid }}/unlocks/preview.png" alt="Next unlock preview"
+             style="width:100%;border-radius:14px;display:block;background:var(--field);aspect-ratio:1200/520">
+        <p class="hint">The card of your next unlock - it updates as you change the settings.</p>
+      </div>
+      {% if unlock.rows %}
+      <div class="card">
+        <h2>Your kingdom's timeline</h2>
+        {% for u in unlock.rows %}
+        <div class="check" style="{{ 'opacity:.45' if u.passed }}">
+          <div class="box" style="background:rgb({{ u.color|join(',') }});color:#fff">{{ u.emoji }}</div>
+          <span style="flex:1"><b>{{ u.title }}</b><br>
+            <span class="muted">Day {{ u.day_from }}{% if u.day_to != u.day_from %}-{{ u.day_to }}{% endif %} · {{ u.start|dt }}</span></span>
+          {% if u.live %}<span class="pill ok">now</span>{% elif u.passed %}<span class="pill">done</span>
+          {% else %}<span class="pill">{{ u.days_left }}d</span>{% endif %}
+        </div>
+        {% endfor %}
+        <p class="hint">Dates come from community guides and can be a few days off - confirm in game.</p>
+      </div>
+      {% endif %}
+    </aside>
+  </div>
+</section>
+{% endif %}
+
 <!-- ================= BATTLE PLANS ================= -->
 {% if p.plans %}
 <section class="tab" id="tab-plans">
@@ -318,82 +421,178 @@
 <!-- ================= KVK ================= -->
 {% if p.kvk %}
 <section class="tab" id="tab-kvk">
+  <div>
+    <h1 class="largetitle" style="font-size:26px">KvK comparison</h1>
+    <p class="subtitle">Your kingdom against its KvK opponent. Your officers enter the scores from the in-game screens.</p>
+  </div>
+
   <div class="card">
     <div class="row" style="margin:0;justify-content:space-between">
-      <h2 style="margin:0">KvK comparison</h2>
-      {% if p.kvk >= 2 %}<button type="button" data-kvk-new>+ New comparison</button>{% endif %}
+      <div class="row" style="margin:0">
+        {% for k in kvks %}<a class="btn small {{ 'ghost' if sel_kvk and k.id == sel_kvk.id }}" href="?kvk={{ k.id }}#kvk">{{ k.title }}</a>{% endfor %}
+        {% if not kvks %}<span class="muted">No KvKs saved yet.</span>{% endif %}
+      </div>
+      <div class="row" style="margin:0">
+        {% if sel_kvk %}<button type="button" class="small" data-open="kvkimg" data-img="/g/{{ gid }}/kvk/{{ sel_kvk.id }}.png">🖼 Export image</button>{% endif %}
+        {% if p.kvk >= 2 %}<button type="button" data-kvk-new>+ New KvK</button>{% endif %}
+      </div>
     </div>
-    {% if kvks %}
-    <div class="row">
-      {% for k in kvks %}<a class="btn small {{ 'ghost' if sel_kvk and k.id == sel_kvk.id }}" href="?kvk={{ k.id }}#kvk">{{ k.title }}</a>{% endfor %}
+  </div>
+
+  {% if sel_kvk %}
+  {% set d = sel_kvk.data %}{% set pr = sel_kvk.prep %}
+  <div class="card kvk-hero">
+    <div class="kvk-vs">
+      <div><div class="kvk-num ours">#{{ d.our_kingdom or '?' }}</div><div class="muted">YOU</div></div>
+      <div style="text-align:center"><div class="kvk-vs-word">VS</div>
+        {% if d.kvk_date %}<div class="muted">{{ d.kvk_date }}</div>{% endif %}
+        <span class="pill {{ 'ok' if pr.result == 'won' else 'bad' if pr.result == 'lost' else '' }}">{{ {'won': 'Won', 'lost': 'Lost', 'tie': 'Tied'}.get(pr.result, 'In progress') }}</span>
+        {% if d.castle_result in ('won', 'lost') %}<span class="pill {{ 'ok' if d.castle_result == 'won' else 'bad' }}">Castle {{ d.castle_result }}</span>{% endif %}
+      </div>
+      <div><div class="kvk-num theirs">#{{ d.their_kingdom or '?' }}</div><div class="muted">THEM</div></div>
+    </div>
+    <div class="kvk-bar"><i style="width:{{ pr.share|round(1) }}%"></i><b style="left:{{ pr.share|round(1) }}%"></b></div>
+    <p style="text-align:center;margin:10px 0 0">
+      {% if pr.entered %}<b style="color:{{ 'var(--ok)' if pr.share >= 50 else 'var(--bad)' }}">Advantage to {{ 'you' if pr.share >= 50 else 'them' }}</b>
+        &nbsp;<span class="muted">You won {{ pr.won }} of {{ pr.entered }} days so far</span>
+      {% else %}<span class="muted">No preparation scores yet{% if p.kvk >= 2 %} - tap ✏️ Edit to add them{% endif %}.</span>{% endif %}
+    </p>
+    {% if next_kvk_ts %}
+    <div class="row" style="justify-content:center">
+      <span class="pill" style="font-size:14px;padding:8px 14px">⏳ Next KvK <b data-countdown="{{ next_kvk_ts }}">…</b></span>
+      <span class="muted">{{ next_kvk_ts|dt }}</span>
     </div>
     {% endif %}
   </div>
 
-  {% if sel_kvk %}
-  {% set r = sel_kvk.result %}
-  {% set d = sel_kvk.data %}
-  <div class="card verdict {{ r.mood }}">
-    <h3>#{{ d.our_kingdom or '?' }} vs #{{ d.their_kingdom or '?' }}</h3>
-    <p style="margin:6px 0 0;font-size:17px">{{ r.verdict }}</p>
-    {% if d.notes %}<p class="muted" style="margin:8px 0 0">{{ d.notes }}</p>{% endif %}
-  </div>
-  <div class="stats">
-    <div class="stat"><b>{{ r.ours.top_total|power }}</b><span class="muted">our top {{ r.n }}</span></div>
-    <div class="stat"><b>{{ r.theirs.top_total|power }}</b><span class="muted">their top {{ r.n }}</span></div>
-    <div class="stat"><b>{{ r.wins }}/{{ r.n }}</b><span class="muted">rank matchups we win</span></div>
-    <div class="stat"><b>{{ r.ours.count }} v {{ r.theirs.count }}</b><span class="muted">players listed</span></div>
-  </div>
   <div class="card">
-    <h2>Rank by rank</h2>
-    <div class="scroll"><table class="duel">
+    <div class="row" style="margin:0 0 12px;justify-content:space-between">
+      <h3>📊 Preparation scores</h3>
+      <span class="muted">updated by {{ sel_kvk.updated_by }} · {{ sel_kvk.updated_at|dt }}</span>
+    </div>
+    <div class="row" style="justify-content:space-between;align-items:flex-end;margin:0">
+      <div><span class="muted">#{{ d.our_kingdom }}</span><div class="kvk-total ours">{{ pr.ours|power }}</div></div>
+      <div style="text-align:center">
+        {% if pr.lead is not none %}<span class="pill {{ 'ok' if pr.lead >= 0 else 'bad' }}">{{ 'You lead' if pr.lead >= 0 else 'They lead' }} {{ '%+.1f'|format(pr.lead) if pr.lead >= 0 else '%.1f'|format(-pr.lead / (1 + pr.lead / 100)) }}%</span>{% endif %}
+        <div class="muted">{{ pr.won }}/{{ pr.entered or 5 }} · days won</div></div>
+      <div style="text-align:right"><span class="muted">#{{ d.their_kingdom }}</span><div class="kvk-total theirs">{{ pr.theirs|power }}</div></div>
+    </div>
+    <div class="kvk-bar thin"><i style="width:{{ pr.share|round(1) }}%"></i></div>
+    <div class="kvk-days">
+      {% for day in pr.days %}
+      <div class="stat">
+        <div class="row" style="margin:0;justify-content:space-between"><b>{{ day.name }}</b>
+          {% if day.lead is not none %}<span style="color:{{ 'var(--ok)' if day.lead >= 0 else 'var(--bad)' }};font-size:13px;font-weight:700">{{ '▲' if day.lead >= 0 else '▼' }} {{ '%+.1f'|format(day.lead) }}%</span>{% endif %}</div>
+        {% if day.done %}
+        <div class="row" style="margin:8px 0 0;justify-content:space-between"><b class="ours">{{ day.ours|power }}</b><b class="theirs">{{ day.theirs|power }}</b></div>
+        <div class="kvk-bar thin"><i style="width:{{ day.share|round(1) }}%"></i></div>
+        <span class="muted">{{ 'Won' if day.ours > day.theirs else 'Lost' if day.ours < day.theirs else 'Tied' }}</span>
+        {% else %}<div class="muted" style="margin-top:12px">Not entered</div>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  {% if kvk_rec %}
+  <div class="card">
+    <h3>#{{ d.our_kingdom or '?' }} · KvK record <span class="muted" style="font-size:14px;font-weight:500">· {{ kvk_rec.played }} saved</span></h3>
+    <div class="row" style="gap:40px;justify-content:center;margin-top:16px">
+      {% for label, rate, w, l in [("Preparation", kvk_rec.prep_rate, kvk_rec.prep_w, kvk_rec.prep_l), ("Castle", kvk_rec.castle_rate, kvk_rec.castle_w, kvk_rec.castle_l)] %}
+      <div style="text-align:center">
+        <div class="ring" style="--pct:{{ rate or 0 }}"><div><b>{{ (rate|string ~ '%') if rate is not none else '-' }}</b><span>{{ w }}-{{ l }}</span></div></div>
+        <div style="margin-top:8px;font-weight:600">{{ label }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    <p class="muted" style="margin:18px 0 6px">RECENT KVKS (P = preparation, C = castle)</p>
+    <div class="row" style="margin:0;gap:14px">
+      {% for r in kvk_rec.recent %}
+      <a href="?kvk={{ r.id }}#kvk" title="{{ r.title }}" style="text-decoration:none;display:flex;gap:4px">
+        <span class="res {{ r.prep }}">P</span><span class="res {{ r.castle }}">C</span></a>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% set r = sel_kvk.result %}
+  {% if r.n %}
+  <details class="card"><summary><b style="color:var(--text)">👥 Top players · power comparison</b> &nbsp;<span class="muted">{{ r.verdict }}</span></summary>
+    <div class="scroll" style="margin-top:12px"><table class="duel">
       <thead><tr><th>#</th><th>Us · #{{ d.our_kingdom }}</th><th></th><th>Them · #{{ d.their_kingdom }}</th></tr></thead>
       {% for m in r.pairs %}
       <tr>
         <td class="muted">{{ m.rank }}</td>
         <td><b>{{ m.ours.name if m.ours else '-' }}</b> <span class="muted">{{ m.ours.power|power if m.ours else '' }}</span>
-          <div class="bar"><i style="width:{{ m.our_pct }}%;background:var(--ok)"></i></div></td>
+          <div class="bar"><i style="width:{{ m.our_pct }}%;background:#409cff"></i></div></td>
         <td style="text-align:center"><span class="pill {{ 'ok' if m.diff > 0 else 'bad' if m.diff < 0 else '' }}">{{ ('+' if m.diff > 0 else '') ~ (m.diff|power) }}</span></td>
         <td><b>{{ m.theirs.name if m.theirs else '-' }}</b> <span class="muted">{{ m.theirs.power|power if m.theirs else '' }}</span>
-          <div class="bar"><i style="width:{{ m.their_pct }}%;background:var(--bad)"></i></div></td>
+          <div class="bar"><i style="width:{{ m.their_pct }}%;background:#ff4d5e"></i></div></td>
       </tr>
       {% endfor %}
     </table></div>
-    {% if p.kvk >= 2 %}
-    <div class="row">
-      <button type="button" class="small" data-kvk-edit='{{ {"id": sel_kvk.id, "title": sel_kvk.title, "data": d}|tojson|forceescape }}'>✏️ Edit</button>
-      <form method="post" action="/g/{{ gid }}/kvk/{{ sel_kvk.id }}/post" class="row" style="margin:0">
-        <select name="channel_id" style="width:auto">{% for c in channels %}<option value="{{ c.id }}">#{{ c.name }}</option>{% endfor %}</select>
-        <button class="small">Post to Discord</button>
-      </form>
-      <form method="post" action="/g/{{ gid }}/kvk/{{ sel_kvk.id }}/delete" class="inline" data-confirm="Delete this comparison?"><button class="small danger">Delete</button></form>
-    </div>
-    {% endif %}
+  </details>
+  {% endif %}
+  {% if d.notes %}<div class="card"><b>📝 Notes</b><p style="margin:6px 0 0">{{ d.notes }}</p></div>{% endif %}
+
+  {% if p.kvk >= 2 %}
+  <div class="row">
+    <button type="button" class="small" data-kvk-edit='{{ {"id": sel_kvk.id, "title": sel_kvk.title, "data": d}|tojson|forceescape }}'>✏️ Edit</button>
+    <form method="post" action="/g/{{ gid }}/kvk/{{ sel_kvk.id }}/post" class="row" style="margin:0">
+      <select name="channel_id" style="width:auto">{% for c in channels %}<option value="{{ c.id }}">#{{ c.name }}</option>{% endfor %}</select>
+      <button class="small">Post to Discord</button>
+    </form>
+    <form method="post" action="/g/{{ gid }}/kvk/{{ sel_kvk.id }}/delete" class="inline" data-confirm="Delete this KvK?"><button class="small danger">Delete</button></form>
   </div>
+  {% endif %}
   {% elif not kvks %}
-  <div class="card empty"><div class="big">⚔️</div>No comparisons yet.{% if p.kvk >= 2 %} Tap <b>+ New comparison</b> and paste both kingdoms' top players.{% endif %}</div>
+  <div class="card empty"><div class="big">⚔️</div>No KvKs yet.{% if p.kvk >= 2 %} Tap <b>+ New KvK</b> when you're matched, then add each day's preparation score.{% endif %}</div>
   {% endif %}
 
   {% if p.kvk >= 2 %}
+  <div class="card">
+    <h2>Next KvK countdown</h2>
+    <form method="post" action="/g/{{ gid }}/kvk/next" class="row" style="margin:0">
+      <input type="date" name="date" style="width:auto" value="{{ settings.prefs.next_kvk[:10] if settings.prefs.next_kvk else '' }}">
+      <input type="time" name="time" style="width:auto" value="{{ settings.prefs.next_kvk[11:] if settings.prefs.next_kvk else '' }}">
+      <span class="muted">UTC</span><button class="small">Save</button>
+    </form>
+  </div>
+
   <div class="card" id="kvkform" style="display:none">
-    <h2>Comparison details</h2>
+    <h2>KvK details</h2>
     <form method="post" action="/g/{{ gid }}/kvk/save">
       <input type="hidden" name="kvk_id">
       <div class="fields">
         <div><label>Title (optional)</label><input name="title" placeholder="e.g. KvK Season 3"></div>
-        <div><label>Our kingdom #</label><input name="our_kingdom" inputmode="numeric" placeholder="2041"></div>
-        <div><label>Their kingdom #</label><input name="their_kingdom" inputmode="numeric" placeholder="1987"></div>
-        <div><label>Compare top …</label><input name="top_n" type="number" min="3" max="100" value="10"></div>
+        <div><label>Our kingdom #</label><input name="our_kingdom" inputmode="numeric" placeholder="1844"></div>
+        <div><label>Their kingdom #</label><input name="their_kingdom" inputmode="numeric" placeholder="1830"></div>
+        <div><label>Preparation starts (date)</label><input type="date" name="kvk_date"></div>
       </div>
-      <div class="grid" style="margin-top:4px">
-        <div><label>Our players (one per line: name, power)</label>
-          <textarea name="ours" rows="10" placeholder="Darkblade, 152.3M&#10;Nova 98,500,000&#10;Rook | 1.2B"></textarea></div>
-        <div><label>Their players (one per line: name, power)</label>
-          <textarea name="theirs" rows="10" placeholder="Titan 1.1B&#10;Ace, 160M&#10;Bolt 60M"></textarea></div>
+      <label style="margin-top:16px">Preparation scores (from the in-game KvK screen - 1.37B, 771.2M…)</label>
+      <div class="kvk-days">
+        {% for i in range(5) %}
+        <div class="stat"><b>{{ ['Day I', 'Day II', 'Day III', 'Day IV', 'Day V'][i] }}</b>
+          <label style="margin-top:6px">Us</label><input name="prep_o{{ i }}" placeholder="e.g. 1.37B">
+          <label>Them</label><input name="prep_t{{ i }}" placeholder="e.g. 771.2M"></div>
+        {% endfor %}
       </div>
-      <div class="hint">Power can be 152300000, 152,300,000, 152.3M, 1.2B or 950K. Order doesn't matter - it's sorted for you.</div>
+      <div class="fields">
+        <div><label>Preparation result</label><select name="prep_result">
+          <option value="auto">Work it out from the days</option><option value="won">Won</option><option value="lost">Lost</option></select></div>
+        <div><label>Castle battle result</label><select name="castle_result">
+          <option value="pending">Not played yet</option><option value="won">Won</option><option value="lost">Lost</option></select></div>
+        <div><label>Compare top … players</label><input name="top_n" type="number" min="3" max="100" value="10"></div>
+      </div>
+      <details style="margin-top:12px"><summary>👥 Player power lists (optional)</summary>
+        <div class="grid" style="margin-top:4px">
+          <div><label>Our players (one per line: name, power)</label>
+            <textarea name="ours" rows="8" placeholder="Darkblade, 152.3M&#10;Nova 98,500,000"></textarea></div>
+          <div><label>Their players (one per line: name, power)</label>
+            <textarea name="theirs" rows="8" placeholder="Titan 1.1B&#10;Ace, 160M"></textarea></div>
+        </div>
+      </details>
       <label>Notes (optional)</label><input name="notes" placeholder="e.g. Their #1 shields at night">
-      <div class="row"><button>Save comparison</button><button type="button" class="small" data-kvk-cancel>Cancel</button></div>
+      <div class="row"><button>Save KvK</button><button type="button" class="small" data-kvk-cancel>Cancel</button></div>
     </form>
   </div>
   {% endif %}
@@ -551,6 +750,15 @@
   <img data-src alt="Alert preview" style="width:100%;border-radius:14px;display:block;background:var(--field);aspect-ratio:1200/520">
   <div class="row" style="justify-content:flex-end"><button type="button" data-close>Done</button></div>
 </div></dialog>
+<dialog id="kvkimg"><div class="sheet glass">
+  <div class="grabber"></div>
+  <h3>KvK image</h3>
+  <p class="muted" style="margin-top:0">Share it in Discord, or download it.</p>
+  <img data-src alt="KvK summary" style="width:100%;border-radius:14px;display:block;background:var(--field);aspect-ratio:1400/900">
+  <div class="row" style="justify-content:flex-end">
+    {% if sel_kvk %}<a class="btn small" href="/g/{{ gid }}/kvk/{{ sel_kvk.id }}.png" download="kvk.png">⬇ Download</a>{% endif %}
+    <button type="button" data-close>Done</button></div>
+</div></dialog>
 <dialog id="planimg"><div class="sheet glass">
   <div class="grabber"></div>
   <h3>Battle plan image</h3>
@@ -592,6 +800,43 @@ document.querySelectorAll(".tl-day").forEach(el => {
   el.textContent = diff === 0 ? "Today" : diff === 1 ? "Tomorrow"
     : d.toLocaleDateString(undefined, {weekday: "long", day: "numeric", month: "short"});
 });
+
+// ---------- live countdowns (next KvK) ----------
+function tick() {
+  document.querySelectorAll("[data-countdown]").forEach(e => {
+    let s = Math.max(0, +e.dataset.countdown - Date.now() / 1000);
+    const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60), sec = Math.floor(s % 60);
+    e.textContent = s ? `${d}d ${h}h ${m}m ${sec}s` : "now";
+  });
+}
+tick(); setInterval(tick, 1000);
+
+// ---------- kingdom unlocks: start mode, chips, live preview ----------
+const uf = document.getElementById("unlockform");
+if (uf) {
+  const el = n => uf.elements.namedItem(n);
+  uf.querySelectorAll("[data-start-pick]").forEach(b => b.addEventListener("click", () => {
+    const m = b.dataset.startPick; el("start_mode").value = m;
+    uf.querySelectorAll("[data-start-pick]").forEach(x => x.classList.toggle("on", x === b));
+    uf.querySelectorAll("[data-start]").forEach(x => x.style.display = x.dataset.start === m ? "" : "none");
+    refresh();
+  }));
+  uf.querySelector("[data-cats-all]").addEventListener("click", () => {
+    uf.querySelectorAll("input[name=categories]").forEach(c => c.checked = true); refresh();
+  });
+  let t;
+  function refresh() {
+    clearTimeout(t);
+    t = setTimeout(() => {
+      const q = new URLSearchParams({kingdom: el("kingdom").value,
+        categories: [...uf.querySelectorAll("input[name=categories]:checked")].map(c => c.value).join(",")});
+      if (el("start_mode").value === "day" && el("current_day").value) q.set("current_day", el("current_day").value);
+      else if (el("open_date").value) q.set("open_date", el("open_date").value);
+      document.getElementById("unlockpreview").src = `/g/{{ gid }}/unlocks/preview.png?${q}`;
+    }, 400);
+  }
+  uf.addEventListener("input", refresh); uf.addEventListener("change", refresh);
+}
 
 // ---------- dashboard access: role or member ----------
 document.querySelectorAll("[data-target-pick]").forEach(b => b.addEventListener("click", () => {
@@ -664,6 +909,11 @@ if (kvkCard) {
       el("title").value = k.title; el("our_kingdom").value = k.data.our_kingdom || "";
       el("their_kingdom").value = k.data.their_kingdom || ""; el("top_n").value = k.data.top_n || 10;
       el("ours").value = lines(k.data.ours); el("theirs").value = lines(k.data.theirs); el("notes").value = k.data.notes || "";
+      el("kvk_date").value = k.data.kvk_date || "";
+      el("prep_result").value = k.data.prep_result || "auto"; el("castle_result").value = k.data.castle_result || "pending";
+      (k.data.prep || []).forEach((pair, i) => {
+        el("prep_o" + i).value = pair[0] == null ? "" : pair[0]; el("prep_t" + i).value = pair[1] == null ? "" : pair[1];
+      });
     }
     kvkCard.style.display = "block"; kvkCard.scrollIntoView({behavior: "smooth", block: "start"});
   }

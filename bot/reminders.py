@@ -173,13 +173,31 @@ async def run_due(db: DB, send: Sender, now: float) -> int:
     return sent
 
 
-async def reminder_loop(db: DB, send: Sender):
+async def run_due_unlocks(db: DB, send_unlock, now: float) -> int:
+    """Kingdom unlock reminders that are due now, for every server that switched them on."""
+    from .unlocks import due_posts
+    sent = 0
+    for guild_id, settings in db.all_unlock_settings():
+        try:
+            for unlock, lead, key in due_posts(settings, db.unlock_sent_keys(guild_id), now):
+                db.mark_unlock_sent(guild_id, key)      # mark first: never double-post, even if Discord errors
+                await send_unlock(guild_id, settings, unlock, lead)
+                sent += 1
+        except Exception as e:
+            STATE["last_error"] = f"unlocks {guild_id}: {e}"
+            log.exception("unlock reminders for %s failed", guild_id)
+    return sent
+
+
+async def reminder_loop(db: DB, send: Sender, send_unlock=None):
     """Runs forever. Survives any error: it logs it and carries on with the next check."""
     STATE["started"] = time.time()
     log.info("Reminder checker started (every %ss)", TICK)
     while True:
         try:
             STATE["sent"] += await run_due(db, send, time.time())
+            if send_unlock:
+                STATE["sent"] += await run_due_unlocks(db, send_unlock, time.time())
         except Exception as e:      # e.g. database briefly locked - never let the loop die
             STATE["last_error"] = str(e)
             log.exception("reminder check failed")

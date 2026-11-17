@@ -111,7 +111,9 @@ class TestNewTables(unittest.TestCase):
         self.db = DB(":memory:")
 
     def test_prefs_default_private(self):
-        self.assertEqual(self.db.guild_settings(1)["prefs"], PRIVATE)
+        prefs = self.db.guild_settings(1)["prefs"]
+        self.assertEqual({k: prefs[k] for k in PRIVATE}, PRIVATE)
+        self.assertIsNone(prefs["next_kvk"])
         self.db.set_prefs(1, members_see_activity=True, nonsense=1)
         self.assertEqual(self.db.guild_settings(1)["prefs"]["members_see_activity"], True)
         self.assertNotIn("nonsense", self.db.guild_settings(1)["prefs"])
@@ -143,3 +145,100 @@ class TestNewTables(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestUnlocks(unittest.TestCase):
+    def setUp(self):
+        from datetime import datetime, timezone
+        self.utc = lambda y, m, d, h=0, mi=0: int(datetime(y, m, d, h, mi, tzinfo=timezone.utc).timestamp())
+        # kingdom opened 2026-03-10 -> Gen 5 (day 270) starts 2026-12-05
+        self.s = {"enabled": True, "channel_id": "1", "kingdom": "1844", "open_date": "2026-03-10",
+                  "leads": [7, 1, 0], "categories": ["heroes"], "role_id": None}
+
+    def test_open_date_from_current_day(self):
+        from bot.unlocks import kingdom_day, open_date_from_day
+        now = self.utc(2026, 11, 17, 9)
+        od = open_date_from_day(252, now)
+        self.assertEqual(od, "2026-03-10")
+        self.assertEqual(kingdom_day(od, now), 252)
+
+    def test_posts_at_noon_on_each_lead_day_once(self):
+        from bot.unlocks import due_posts
+        sent = set()
+        self.assertEqual(due_posts(self.s, sent, self.utc(2026, 11, 28, 11, 59)), [])           # before 12:00
+        due = due_posts(self.s, sent, self.utc(2026, 11, 28, 12, 0))                           # 7 days before
+        self.assertEqual([(u["key"], lead) for u, lead, _ in due], [("gen5", 7)])
+        sent.add(due[0][2])
+        self.assertEqual(due_posts(self.s, sent, self.utc(2026, 11, 28, 15, 0)), [])           # not twice
+        self.assertEqual([lead for _, lead, _ in due_posts(self.s, sent, self.utc(2026, 12, 4, 12, 1))], [1])
+        self.assertEqual([lead for _, lead, _ in due_posts(self.s, sent, self.utc(2026, 12, 5, 13, 0))], [0])
+
+    def test_late_bot_still_posts_same_day_but_not_next_day(self):
+        from bot.unlocks import due_posts
+        self.assertEqual(len(due_posts(self.s, set(), self.utc(2026, 12, 4, 20, 0))), 1)       # 8h late: ok
+        self.assertEqual(due_posts(self.s, set(), self.utc(2026, 12, 6, 12, 1))[:0], [])
+        late = [lead for _, lead, _ in due_posts(self.s, set(), self.utc(2026, 12, 6, 12, 1))]
+        self.assertNotIn(0, late)                                                              # a day late: skipped
+
+    def test_categories_and_off_switch(self):
+        from bot.unlocks import due_posts
+        pets_only = dict(self.s, categories=["pets"])
+        self.assertEqual(due_posts(pets_only, set(), self.utc(2026, 11, 28, 12, 0)), [])
+        self.assertEqual(due_posts(dict(self.s, enabled=False), set(), self.utc(2026, 11, 28, 12, 0)), [])
+
+    def test_checker_sends_and_remembers(self):
+        import asyncio
+        from bot.reminders import run_due_unlocks
+        db = DB(":memory:")
+        db.save_unlock_settings(5, self.s)
+        posted = []
+
+        async def send(gid, settings, unlock, lead):
+            posted.append((gid, unlock["key"], lead))
+
+        now = self.utc(2026, 11, 28, 12, 0, )
+        self.assertEqual(asyncio.run(run_due_unlocks(db, send, now)), 1)
+        self.assertEqual(asyncio.run(run_due_unlocks(db, send, now + 60)), 0)
+        self.assertEqual(posted, [("5", "gen5", 7)])
+
+    def test_card(self):
+        from bot.alert_card import render_card
+        from bot.unlocks import card_for, unlock_list
+        u = [x for x in unlock_list("2026-03-10", self.utc(2026, 11, 17)) if x["key"] == "gen5"][0]
+        c = card_for(u, "1844", self.utc(2026, 11, 17))
+        self.assertEqual((c["big"], c["unit"], c["tag"]), ("18", "DAYS", "KINGDOM 1844 · HEROES"))
+        self.assertTrue(render_card(c).startswith(b"\x89PNG"))
+
+
+class TestKvKPrep(unittest.TestCase):
+    def test_orbio_example(self):
+        from bot.kvk import parse_prep, prep_summary
+        p = prep_summary(parse_prep([("1.37B", "771.2M"), ("1.23B", "541.6M"), ("850.9M", "356.7M"),
+                                     ("1.35B", "454.0M"), ("1.17B", "478.7M")]))
+        self.assertEqual((p["won"], p["entered"], p["result"]), (5, 5, "won"))
+        self.assertAlmostEqual(p["lead"], 129.5, places=1)
+
+    def test_partial_and_overrides(self):
+        from bot.kvk import parse_prep, prep_summary
+        prep = parse_prep([("1B", "2B"), ("", "")])
+        self.assertEqual(prep_summary(prep)["result"], "pending")
+        self.assertEqual(prep_summary(prep, "won")["result"], "won")                   # officer override
+        three = parse_prep([("1B", "2B")] * 3)
+        self.assertEqual(prep_summary(three)["result"], "lost")                        # 3 days lost = decided
+
+    def test_record(self):
+        from bot.kvk import kingdom_record, parse_prep
+        win, loss = parse_prep([("2B", "1B")] * 5), parse_prep([("1B", "2B")] * 5)
+        rec = kingdom_record([
+            {"id": 1, "title": "a", "data": {"kvk_date": "2026-09-01", "prep": win, "castle_result": "won"}},
+            {"id": 2, "title": "b", "data": {"kvk_date": "2026-10-01", "prep": loss, "castle_result": "lost"}},
+            {"id": 3, "title": "c", "data": {"kvk_date": "2026-11-01", "prep": win, "castle_result": "pending"}}])
+        self.assertEqual((rec["prep_w"], rec["prep_l"], rec["prep_rate"]), (2, 1, 67))
+        self.assertEqual((rec["castle_w"], rec["castle_l"], rec["castle_rate"]), (1, 1, 50))
+        self.assertEqual([r["id"] for r in rec["recent"]], [1, 2, 3])
+
+    def test_image(self):
+        from bot.kvk import kingdom_record, parse_prep, prep_summary
+        from bot.kvk_card import render_kvk
+        d = {"our_kingdom": "1", "their_kingdom": "2", "prep": parse_prep([("1B", "2B")])}
+        self.assertTrue(render_kvk(d, prep_summary(d["prep"]), kingdom_record([])).startswith(b"\x89PNG"))

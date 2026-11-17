@@ -79,12 +79,18 @@ def render_card(card: dict, footer: str = "", brand: str = "URSA-KINGSHOT") -> b
 
     # --- start time
     occ = datetime.fromtimestamp(int(card["occ"]), timezone.utc)
-    sub = f"Starts at {occ:%H:%M} UTC · {occ:%a %d %b}"
+    sub = card.get("subtitle") or f"Starts at {occ:%H:%M} UTC · {occ:%a %d %b}"
     d.text((pad, 252 * s), sub, font=_font("Inter-Medium.otf", 28), fill=(168, 174, 194), anchor="ls")
+    if card.get("detail"):                     # optional extra line (e.g. hero names)
+        detail = card["detail"]
+        f_det = _font("Inter-Medium.otf", 22)
+        while d.textlength(detail, font=f_det) > w * 0.55 and len(detail) > 10:
+            detail = detail[:-4] + "…"
+        d.text((pad, 352 * s), detail, font=f_det, fill=_mix((168, 174, 194), accent, 0.35), anchor="ls")
 
     # --- progress bar: fills up as the start gets closer
     mb, mx = int(card["minutes_before"]), max(int(card["max_before"]), 1)
-    progress = 1.0 if mb == 0 else max(0.06, 1 - mb / (mx * 1.15))
+    progress = card.get("progress") or (1.0 if mb == 0 else max(0.06, 1 - mb / (mx * 1.15)))
     bx0, by0, bx1 = pad, 300 * s, int(w * 0.50)
     d.rounded_rectangle([bx0, by0, bx1, by0 + 12 * s], radius=6 * s, fill=(38, 42, 58))
     fill_to = bx0 + int((bx1 - bx0) * progress)
@@ -104,7 +110,9 @@ def render_card(card: dict, footer: str = "", brand: str = "URSA-KINGSHOT") -> b
     d.ellipse([cx - r, cy - r, cx + r, cy + r], outline=(44, 48, 66), width=12 * s)
     d.arc([cx - r, cy - r, cx + r, cy + r], start=-90, end=-90 + 360 * progress,
           fill=accent, width=12 * s)
-    if mb == 0:
+    if card.get("big"):
+        num, unit = card["big"], card.get("unit", "")
+    elif mb == 0:
         num, unit = "NOW", "STARTING"
     elif mb < 60 or mb % 60:
         num, unit = str(mb), "MIN"

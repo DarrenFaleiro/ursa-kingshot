@@ -7,9 +7,12 @@ A Discord bot + website for your Kingshot alliance servers:
 - **Gift codes** - finds new codes automatically and redeems them for every linked account
 - **Reminders** - Bear Trap (Group 1 and Group 2), Arena reset and any custom event. Alerts are rich
   Discord embeds with a countdown picture, a live "starts in …" timer and the time in each member's own time zone
-- **Timeline** - every event and alert for the next 7 days
+- **Schedule** - every event and alert for the next 7 days
+- **Kingdom unlock reminders** - posts upcoming unlocks (hero generations, pets, Truegold, War Academy, PvP…) based on
+  your kingdom's age, with a live preview card; you choose how many days before and which kinds
 - **Battle plans** - build Castle / KvK / Bear Trap squads (leader, joiners, target, time) and post them as an image
-- **KvK comparison** - paste both kingdoms' top players and power; get totals, rank-by-rank matchups and a verdict
+- **KvK** - enter each preparation day's scores; see the lead, days won, result, castle result, your kingdom's
+  KvK record, a next-KvK countdown and a shareable image (plus optional top-player power comparison)
 - **Officer access** - give a role (e.g. R4) or a member view/edit access to chosen sections, without Discord admin
 - **Privacy** - recent claims and activity are admins/officers-only by default; members can be allowed to see them, with names masked
 - **Public page** - anyone can see active gift codes without logging in (no player data)
@@ -42,7 +45,8 @@ Everything can be managed from **either** the website or Discord. The website's 
 | Reminders: add, edit, pause, resume, test, delete | Server → Reminders | `/reminder add\|edit\|pause\|resume\|test\|remove` | managers |
 | Alert role buttons | Server → Reminders | `/reminder rolebuttons` | managers |
 | Add code, redeem now, check connection | Gift codes | `/code add`, `/code redeem-now`, `/code check-salt` | managers |
-| Timeline | Server → Timeline | `/timeline` | everyone |
+| Schedule | Server → Schedule | `/timeline` | everyone |
+| Kingdom unlock reminders | Server → Unlocks | `/unlocks next\|setup\|off` | everyone views, officers edit |
 | Battle plans | Server → Battle plans | `/plan list\|show\|post` | members view, officers edit |
 | KvK comparison | Server → KvK | `/kvk list\|show\|post` | members view, officers edit |
 | Recent claims | Server → Overview | `/claims` | admins/officers (members if allowed) |

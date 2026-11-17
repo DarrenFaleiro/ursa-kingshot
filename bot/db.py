@@ -89,6 +89,16 @@ CREATE TABLE IF NOT EXISTS sessions (
     guilds     TEXT,                     -- JSON {manage: [...], member: [...]} guild ids
     expires    INTEGER
 );
+CREATE TABLE IF NOT EXISTS unlock_settings (
+    guild_id   TEXT PRIMARY KEY,
+    data       TEXT NOT NULL                  -- JSON, see unlocks.DEFAULTS
+);
+CREATE TABLE IF NOT EXISTS unlock_sent (
+    guild_id   TEXT NOT NULL,
+    key        TEXT NOT NULL,                 -- "<unlock>:<days before>"
+    at         INTEGER,
+    PRIMARY KEY (guild_id, key)
+);
 CREATE TABLE IF NOT EXISTS log (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
     at        INTEGER,
@@ -103,6 +113,7 @@ DONE_RESULTS = ("success", "already")
 DEFAULT_PREFS = {
     "members_see_activity": False,   # can ordinary members see recent claims + activity?
     "mask_for_members": True,        # if they can, hide player names/IDs (3153•••276)
+    "next_kvk": None,                # "YYYY-MM-DD HH:MM" UTC, for the countdown on the KvK page
 }
 
 
@@ -398,6 +409,27 @@ class DB:
 
     def delete_kvk(self, kvk_id: int, guild_id) -> bool:
         return self._exec("DELETE FROM kvk_compare WHERE id=? AND guild_id=?", (kvk_id, str(guild_id))).rowcount > 0
+
+    # ---------- kingdom unlock reminders ----------
+    def unlock_settings(self, guild_id) -> dict:
+        from .unlocks import DEFAULTS
+        row = self.conn.execute("SELECT data FROM unlock_settings WHERE guild_id=?", (str(guild_id),)).fetchone()
+        return {**DEFAULTS, **(json.loads(row["data"]) if row else {})}
+
+    def save_unlock_settings(self, guild_id, data: dict) -> None:
+        self._exec("INSERT INTO unlock_settings VALUES (?,?) ON CONFLICT(guild_id) DO UPDATE SET data=excluded.data",
+                   (str(guild_id), json.dumps(data)))
+
+    def all_unlock_settings(self) -> list[tuple[str, dict]]:
+        from .unlocks import DEFAULTS
+        return [(r["guild_id"], {**DEFAULTS, **json.loads(r["data"])})
+                for r in self.conn.execute("SELECT * FROM unlock_settings")]
+
+    def unlock_sent_keys(self, guild_id) -> set:
+        return {r["key"] for r in self.conn.execute("SELECT key FROM unlock_sent WHERE guild_id=?", (str(guild_id),))}
+
+    def mark_unlock_sent(self, guild_id, key: str) -> None:
+        self._exec("INSERT OR IGNORE INTO unlock_sent VALUES (?,?,?)", (str(guild_id), key, int(time.time())))
 
     # ---------- activity log ----------
     def log(self, text: str, guild_id=None) -> None:
