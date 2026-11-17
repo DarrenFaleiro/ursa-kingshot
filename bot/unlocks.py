@@ -20,25 +20,31 @@ CATEGORIES = {
 
 # key, category, day_from, day_to, title, details
 SCHEDULE = [
-    ("plains-fog", "features", 14, 14, "Plains fog lifted", "More of the map opens up"),
-    ("fertile-fog", "features", 38, 38, "Fertile Land fog lifted", "The Fertile Land opens up"),
-    ("gen2-heroes", "heroes", 40, 50, "Generation 2 heroes", "Save hero summons and gems"),
+    # Days follow the kingshotmastery.com server timeline (checked Nov 2026); other guides differ by a few days.
+    ("plains-fog", "features", 11, 13, "Plains fog lifted", "More of the map opens up"),
+    ("fortresses", "pvp", 21, 23, "Fortresses", "Fortress Battle opens"),
+    ("fertile-fog", "features", 33, 38, "Fertile Land fog lifted", "The Fertile Land opens up"),
     ("res-exchange", "features", 45, 45, "Alliance Resource Exchange", ""),
-    ("castle-1", "pvp", 54, 54, "First Castle Battle", "Prepare troops and healing speedups"),
-    ("gen1-pets", "pets", 55, 60, "Generation 1 pets", "Gray Wolf, Lynx, Bison"),
-    ("truegold", "truegold", 70, 70, "Age of Truegold", "Truegold items become available"),
-    ("kvk-eligible", "pvp", 70, 80, "Kingdom of Power (KvK) eligibility", "Your kingdom can be matched for KvK"),
-    ("gen2-pets", "pets", 75, 80, "Generation 2 pets", "Cheetah, Moose"),
-    ("gen3-pets", "pets", 105, 110, "Generation 3 pets", "Lion, Grizzly Bear"),
-    ("gen3-heroes", "heroes", 105, 120, "Generation 3 heroes", "Eric, Petra, Jaeger"),
-    ("truegold-5", "truegold", 150, 150, "Truegold Lv. 5 & Truegold Crucible", ""),
-    ("artisans", "features", 170, 170, "Artisan's Vision & Vikings Vengeance Lv. 12-20", "Alliance Championship store"),
-    ("gen4", "heroes", 190, 200, "Generation 4 heroes & pets", "Giant Rhino, Mighty Bison"),
-    ("war-academy", "buildings", 220, 225, "War Academy", "The big resource gate - stock up"),
-    ("gen5", "heroes", 270, 280, "Generation 5 heroes & pets", "Long Fei, Thrud, Vivian · Great Moose, Alpha Black Panther"),
-    ("truegold-8", "truegold", 310, 320, "Tempered Truegold (Lv. 8)", ""),
-    ("gen6", "heroes", 350, 360, "Generation 6 heroes & pets", "Regal White Lion, Ironclad War Elephant"),
-    ("gen7", "heroes", 440, 450, "Generation 7 heroes & pet", "Ironclad War Bear"),
+    ("castle-1", "pvp", 48, 52, "First Castle Battle", "King's Castle opens - prepare troops and healing"),
+    ("gen2-heroes", "heroes", 50, 50, "Generation 2 heroes", "Hilde, Marlin, Zoe"),
+    ("gen1-pets", "pets", 55, 55, "Generation 1 pets", "Gray Wolf, Lynx, Bison"),
+    ("truegold", "truegold", 59, 69, "Age of Truegold", "Needs Town Center Lv. 30"),
+    ("gen2-pets", "pets", 72, 72, "Generation 2 pets", "Cheetah, Moose"),
+    ("gen3-heroes", "heroes", 113, 113, "Generation 3 heroes", "Eric, Petra, Jaeger"),
+    ("gen3-pets", "pets", 113, 113, "Generation 3 pets", "Lion, Grizzly Bear"),
+    ("truegold-5", "truegold", 155, 155, "Truegold Lv. 5 & Truegold Crucible", ""),
+    ("gen4-heroes", "heroes", 197, 197, "Generation 4 heroes", "Margot, Rosa, Alcar"),
+    ("gen4-pets", "pets", 197, 197, "Generation 4 pets", "Giant Rhino, Mighty Bison"),
+    ("war-academy", "buildings", 225, 225, "War Academy", "T11 troop research - needs Town Center Lv. 30"),
+    ("gen5-heroes", "heroes", 281, 281, "Generation 5 heroes", "Long Fei, Thrud, Vivian"),
+    ("gen5-pets", "pets", 281, 281, "Generation 5 pets", "Great Moose, Alpha Black Panther"),
+    ("truegold-8", "truegold", 323, 323, "Tempered Truegold (TG8)", "Truegold cap rises to Lv. 8"),
+    ("gen6-heroes", "heroes", 365, 365, "Generation 6 heroes", "Triton, Sophia, Yang"),
+    ("gen6-pets", "pets", 365, 365, "Generation 6 pets", "Regal White Lion, Ironclad War Elephant"),
+    ("gen7-heroes", "heroes", 449, 449, "Generation 7 heroes", "Ava, Charles, Wee & Woo"),
+    ("gen7-pets", "pets", 449, 449, "Generation 7 pet", "Ironclad War Bear"),
+    ("truegold-10", "truegold", 491, 491, "Truegold Lv. 10 (TG10)", "Final Truegold tier"),
+    ("gen8-heroes", "heroes", 533, 533, "Generation 8 heroes", "Diego, Liz, Luna"),
 ]
 
 LEAD_CHOICES = [30, 14, 7, 3, 1, 0]          # days before; 0 = on the day
@@ -102,14 +108,22 @@ def due_posts(settings: dict, sent: set, now: float) -> list[tuple[dict, int, st
     return out
 
 
+def names_of(u: dict) -> list:
+    """Hero / pet names for the portrait row ('Long Fei, Thrud, Vivian' -> 3 names); empty for other unlocks."""
+    if u["cat"] not in ("heroes", "pets") or not u["details"]:
+        return []
+    return [n.strip() for n in u["details"].split(",") if n.strip()]
+
+
 def card_for(u: dict, kingdom: str, now: float | None = None) -> dict:
     """Details for the unlock picture (see alert_card.render_card)."""
     now = now or time.time()
     days = max(0, math.ceil((u["start"] - now) / 86400))
     rng = f"Day {u['day_from']}" if u["day_from"] == u["day_to"] else f"Day {u['day_from']}-{u['day_to']}"
     when = datetime.fromtimestamp(u["start"], timezone.utc).strftime("%b %d, %Y")
+    faces = names_of(u)
     return {"title": u["title"], "tag": f"KINGDOM {kingdom or '?'} · {u['label'].upper()}",
-            "subtitle": f"{when} · {rng}", "detail": u["details"], "color": u["color"],
+            "subtitle": f"{when} · {rng}", "detail": u["details"], "faces": faces, "color": u["color"],
             "big": "NOW" if days == 0 else str(days), "unit": "TODAY" if days == 0 else ("DAY" if days == 1 else "DAYS"),
             "progress": 1.0 if days == 0 else max(0.06, 1 - days / 30), "occ": u["start"],
             "minutes_before": days * 1440, "max_before": 30 * 1440}

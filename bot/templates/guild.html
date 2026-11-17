@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ g.name }} · {{ bot_name }}{% endblock %}
+{% block mainclass %}guild{% endblock %}
 
 {% macro reminder_fields(r=None) %}
 <div class="fields">
@@ -29,32 +30,33 @@
 {% endmacro %}
 
 {% block content %}
-<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
-  {% if g.icon %}<img class="icon" src="{{ g.icon.url }}" alt="" style="width:64px;height:64px;border-radius:18px">
-  {% else %}<div class="icon" style="width:64px;height:64px;border-radius:18px;font-size:26px">{{ g.name[:1] }}</div>{% endif %}
-  <div style="flex:1;min-width:200px">
-    <h1 class="largetitle">{{ g.name }}</h1>
-    <p class="subtitle">
+<aside class="side">
+  <div class="side-head">
+    {% if g.icon %}<img class="icon" src="{{ g.icon.url }}" alt="">{% else %}<div class="icon">{{ g.name[:1] }}</div>{% endif %}
+    <div style="min-width:0">
+      <h1 class="side-title">{{ g.name }}</h1>
       <span class="pill {{ 'ok' if p.role == 'admin' else '' }}">{{ {'admin': 'Admin', 'officer': 'Officer', 'member': 'Member'}[p.role] }}</span>
-      &nbsp;Times show in your time zone · forms use UTC (game time)</p>
+    </div>
   </div>
-</div>
-
-<div class="tabs">
-  <a href="#overview">Overview</a>
-  <a href="#timeline">Schedule</a>
-  {% if p.reminders %}<a href="#unlocks">Unlocks</a>{% endif %}
-  {% if p.reminders %}<a href="#reminders">Reminders · {{ reminders|length }}</a>{% endif %}
-  {% if p.plans %}<a href="#plans">Battle plans</a>{% endif %}
-  {% if p.kvk %}<a href="#kvk">KvK</a>{% endif %}
-  {% if p.players %}<a href="#players">Players · {{ players|length }}</a>{% endif %}
-  {% if p.settings >= 2 or p.access >= 2 %}<a href="#settings">Settings</a>{% endif %}
-</div>
+  <nav class="tabs">
+    <span class="cat">Alliance</span>
+    <a href="#overview"><i>🏠</i>overview</a>
+    <a href="#timeline"><i>📅</i>schedule</a>
+    {% if p.players %}<a href="#players"><i>👥</i>players<em>{{ players|length }}</em></a>{% endif %}
+    {% if p.reminders or p.plans or p.kvk %}<span class="cat">Events</span>{% endif %}
+    {% if p.reminders %}<a href="#reminders"><i>⏰</i>reminders<em>{{ reminders|length }}</em></a>{% endif %}
+    {% if p.reminders %}<a href="#unlocks"><i>🔓</i>unlocks</a>{% endif %}
+    {% if p.plans %}<a href="#plans"><i>🗺️</i>battle-plans</a>{% endif %}
+    {% if p.kvk %}<a href="#kvk"><i>⚔️</i>kvk</a>{% endif %}
+    {% if p.settings >= 2 or p.access >= 2 %}<span class="cat">Admin</span><a href="#settings"><i>⚙️</i>settings</a>{% endif %}
+  </nav>
+  <p class="side-foot">Times show in your time zone · forms use UTC (game time)</p>
+</aside>
 
 <!-- ================= OVERVIEW ================= -->
 <section class="tab" id="tab-overview">
   {% if p.role == 'admin' and not auto_done %}
-  <div class="card" style="background:linear-gradient(135deg, color-mix(in srgb, var(--accent) 28%, var(--glass)), var(--glass))">
+  <div class="card" style="background:linear-gradient(135deg, color-mix(in srgb, var(--accent) 35%, var(--card)), var(--card) 70%)">
     <h3>✨ Let the bot set up your server</h3>
     <p class="muted" style="margin:4px 0 0">Creates a Kingshot category with gift-code, Bear Trap, Arena and event channels,
       roles for <b>both Bear Trap groups</b>, Arena and events, plus alert buttons.</p>

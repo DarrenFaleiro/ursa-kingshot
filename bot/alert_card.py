@@ -20,6 +20,8 @@ except ImportError:          # pragma: no cover
     Image = None
 
 FONTS = Path(__file__).parent / "assets" / "fonts"
+PORTRAITS = Path(__file__).parent / "assets" / "portraits"   # drop <name>.png here, e.g. long-fei.png
+GOLD = (226, 178, 72)
 W, H, FOOT = 1200, 520, 74
 SCALE = 2   # draw at 2x then shrink = smooth edges
 
@@ -33,6 +35,52 @@ def _font(name: str, size: int):
 
 def _mix(c1, c2, t):
     return tuple(int(a + (b - a) * t) for a, b in zip(c1, c2))
+
+
+def slug(name: str) -> str:
+    """'Long Fei' -> 'long-fei', 'Wee & Woo' -> 'wee-woo' (portrait file names)."""
+    out = "".join(c if c.isalnum() else "-" for c in name.lower())
+    return "-".join(p for p in out.split("-") if p)
+
+
+def portrait_path(name: str):
+    for ext in (".png", ".webp", ".jpg", ".jpeg"):
+        f = PORTRAITS / (slug(name) + ext)
+        if f.is_file():
+            return f
+    return None
+
+
+def _draw_faces(img, d, names, x, y, accent):
+    """Gold-framed square tiles: the portrait if you've added one, otherwise the initials."""
+    s = SCALE
+    size, gap = 80 * s, 26 * s
+    f_init = _font("InterDisplay-ExtraBold.otf", 30)
+    f_name = _font("InterDisplay-SemiBold.otf", 16)
+    for i, name in enumerate(names[:5]):
+        x0 = x + i * (size + gap)
+        box = [x0, y, x0 + size, y + size]
+        d.rounded_rectangle(box, radius=16 * s, fill=_mix((20, 22, 33), accent, 0.30), outline=GOLD, width=4 * s)
+        pic = portrait_path(name)
+        if pic:
+            try:
+                im = Image.open(pic).convert("RGB")
+                side = min(im.size)
+                im = im.crop(((im.width - side) // 2, 0, (im.width + side) // 2, side))   # keep the face (top)
+                inner = size - 10 * s
+                im = im.resize((inner, inner), Image.LANCZOS)
+                mask = Image.new("L", (inner, inner), 0)
+                ImageDraw.Draw(mask).rounded_rectangle([0, 0, inner - 1, inner - 1], radius=12 * s, fill=255)
+                img.paste(im, (x0 + 5 * s, y + 5 * s), mask)
+            except OSError:
+                pic = None
+        if not pic:
+            initials = "".join(w[0] for w in name.replace("&", " ").split()[:2]).upper()
+            d.text((x0 + size // 2, y + size // 2), initials, font=f_init, fill=_mix((255, 255, 255), accent, 0.25), anchor="mm")
+        label = name
+        while d.textlength(label, font=f_name) > size + gap - 6 * s and len(label) > 4:
+            label = label[:-2] + "…"
+        d.text((x0 + size // 2, y + size + 20 * s), label, font=f_name, fill=(225, 228, 238), anchor="mm")
 
 
 def render_card(card: dict, footer: str = "", brand: str = "URSA-KINGSHOT") -> bytes | None:
@@ -59,13 +107,14 @@ def render_card(card: dict, footer: str = "", brand: str = "URSA-KINGSHOT") -> b
         d.ellipse([cx - r, cy - r, cx + r, cy + r], outline=_mix((13, 15, 24), accent, 0.10), width=2 * s)
 
     pad = 64 * s
+    up = 22 * s if card.get("faces") else 0     # lift the text a little to make room for portraits
 
     # --- tag pill
     tag = card.get("tag") or ""
     if tag:
         f = _font("InterDisplay-SemiBold.otf", 19)
         tw = d.textlength(tag, font=f)
-        x0, y0 = pad, 58 * s
+        x0, y0 = pad, 58 * s - up // 2
         d.rounded_rectangle([x0, y0, x0 + tw + 36 * s, y0 + 44 * s], radius=22 * s,
                             fill=_mix((13, 15, 24), accent, 0.18), outline=_mix((13, 15, 24), accent, 0.65), width=2 * s)
         d.text((x0 + 18 * s, y0 + 22 * s), tag, font=f, fill=_mix((255, 255, 255), accent, 0.45), anchor="lm")
@@ -75,13 +124,15 @@ def render_card(card: dict, footer: str = "", brand: str = "URSA-KINGSHOT") -> b
     size = 96
     while size > 48 and d.textlength(title, font=_font("InterDisplay-ExtraBold.otf", size)) > w * 0.56:
         size -= 6
-    d.text((pad, 196 * s), title, font=_font("InterDisplay-ExtraBold.otf", size), fill=(255, 255, 255), anchor="ls")
+    d.text((pad, 196 * s - up), title, font=_font("InterDisplay-ExtraBold.otf", size), fill=(255, 255, 255), anchor="ls")
 
     # --- start time
     occ = datetime.fromtimestamp(int(card["occ"]), timezone.utc)
     sub = card.get("subtitle") or f"Starts at {occ:%H:%M} UTC · {occ:%a %d %b}"
-    d.text((pad, 252 * s), sub, font=_font("Inter-Medium.otf", 28), fill=(168, 174, 194), anchor="ls")
-    if card.get("detail"):                     # optional extra line (e.g. hero names)
+    d.text((pad, 252 * s - up), sub, font=_font("Inter-Medium.otf", 28), fill=(168, 174, 194), anchor="ls")
+    if card.get("faces"):                      # optional row of hero / pet portraits with names
+        _draw_faces(img, d, card["faces"], pad, 310 * s, accent)
+    elif card.get("detail"):                   # optional extra line (e.g. hero names)
         detail = card["detail"]
         f_det = _font("Inter-Medium.otf", 22)
         while d.textlength(detail, font=f_det) > w * 0.55 and len(detail) > 10:
@@ -91,7 +142,7 @@ def render_card(card: dict, footer: str = "", brand: str = "URSA-KINGSHOT") -> b
     # --- progress bar: fills up as the start gets closer
     mb, mx = int(card["minutes_before"]), max(int(card["max_before"]), 1)
     progress = card.get("progress") or (1.0 if mb == 0 else max(0.06, 1 - mb / (mx * 1.15)))
-    bx0, by0, bx1 = pad, 300 * s, int(w * 0.50)
+    bx0, by0, bx1 = pad, 300 * s - up * 2 + (6 * s if up else 0), int(w * 0.50)
     d.rounded_rectangle([bx0, by0, bx1, by0 + 12 * s], radius=6 * s, fill=(38, 42, 58))
     fill_to = bx0 + int((bx1 - bx0) * progress)
     layer = Image.new("RGB", (w, h))

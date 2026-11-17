@@ -151,8 +151,8 @@ class TestUnlocks(unittest.TestCase):
     def setUp(self):
         from datetime import datetime, timezone
         self.utc = lambda y, m, d, h=0, mi=0: int(datetime(y, m, d, h, mi, tzinfo=timezone.utc).timestamp())
-        # kingdom opened 2026-03-10 -> Gen 5 (day 270) starts 2026-12-05
-        self.s = {"enabled": True, "channel_id": "1", "kingdom": "1844", "open_date": "2026-03-10",
+        # kingdom opened 2026-02-27 -> Gen 5 (day 281) starts 2026-12-05
+        self.s = {"enabled": True, "channel_id": "1", "kingdom": "1844", "open_date": "2026-02-27",
                   "leads": [7, 1, 0], "categories": ["heroes"], "role_id": None}
 
     def test_open_date_from_current_day(self):
@@ -162,12 +162,27 @@ class TestUnlocks(unittest.TestCase):
         self.assertEqual(od, "2026-03-10")
         self.assertEqual(kingdom_day(od, now), 252)
 
+    def test_portrait_row(self):
+        from bot.alert_card import render_card, slug
+        from bot.unlocks import card_for, unlock_list
+        rows = {u["key"]: u for u in unlock_list("2026-02-27", self.utc(2026, 11, 17))}
+        self.assertEqual(card_for(rows["gen5-heroes"], "1844")["faces"], ["Long Fei", "Thrud", "Vivian"])
+        self.assertEqual(card_for(rows["war-academy"], "1844")["faces"], [])
+        self.assertEqual((slug("Long Fei"), slug("Wee & Woo")), ("long-fei", "wee-woo"))
+        self.assertTrue(render_card(card_for(rows["gen5-pets"], "1844")).startswith(b"\x89PNG"))
+
+    def test_gen5_names_and_day(self):
+        from bot.unlocks import SCHEDULE
+        rows = {k: (a, t, d) for k, _, a, _, t, d in SCHEDULE}
+        self.assertEqual(rows["gen5-heroes"], (281, "Generation 5 heroes", "Long Fei, Thrud, Vivian"))
+        self.assertEqual(rows["gen5-pets"][2], "Great Moose, Alpha Black Panther")
+
     def test_posts_at_noon_on_each_lead_day_once(self):
         from bot.unlocks import due_posts
         sent = set()
         self.assertEqual(due_posts(self.s, sent, self.utc(2026, 11, 28, 11, 59)), [])           # before 12:00
         due = due_posts(self.s, sent, self.utc(2026, 11, 28, 12, 0))                           # 7 days before
-        self.assertEqual([(u["key"], lead) for u, lead, _ in due], [("gen5", 7)])
+        self.assertEqual([(u["key"], lead) for u, lead, _ in due], [("gen5-heroes", 7)])
         sent.add(due[0][2])
         self.assertEqual(due_posts(self.s, sent, self.utc(2026, 11, 28, 15, 0)), [])           # not twice
         self.assertEqual([lead for _, lead, _ in due_posts(self.s, sent, self.utc(2026, 12, 4, 12, 1))], [1])
@@ -183,7 +198,8 @@ class TestUnlocks(unittest.TestCase):
     def test_categories_and_off_switch(self):
         from bot.unlocks import due_posts
         pets_only = dict(self.s, categories=["pets"])
-        self.assertEqual(due_posts(pets_only, set(), self.utc(2026, 11, 28, 12, 0)), [])
+        self.assertEqual([u["key"] for u, _, _ in due_posts(pets_only, set(), self.utc(2026, 11, 28, 12, 0))], ["gen5-pets"])
+        self.assertEqual(due_posts(dict(self.s, categories=["features"]), set(), self.utc(2026, 11, 28, 12, 0)), [])
         self.assertEqual(due_posts(dict(self.s, enabled=False), set(), self.utc(2026, 11, 28, 12, 0)), [])
 
     def test_checker_sends_and_remembers(self):
@@ -199,12 +215,12 @@ class TestUnlocks(unittest.TestCase):
         now = self.utc(2026, 11, 28, 12, 0, )
         self.assertEqual(asyncio.run(run_due_unlocks(db, send, now)), 1)
         self.assertEqual(asyncio.run(run_due_unlocks(db, send, now + 60)), 0)
-        self.assertEqual(posted, [("5", "gen5", 7)])
+        self.assertEqual(posted, [("5", "gen5-heroes", 7)])
 
     def test_card(self):
         from bot.alert_card import render_card
         from bot.unlocks import card_for, unlock_list
-        u = [x for x in unlock_list("2026-03-10", self.utc(2026, 11, 17)) if x["key"] == "gen5"][0]
+        u = [x for x in unlock_list("2026-02-27", self.utc(2026, 11, 17)) if x["key"] == "gen5-heroes"][0]
         c = card_for(u, "1844", self.utc(2026, 11, 17))
         self.assertEqual((c["big"], c["unit"], c["tag"]), ("18", "DAYS", "KINGDOM 1844 · HEROES"))
         self.assertTrue(render_card(c).startswith(b"\x89PNG"))

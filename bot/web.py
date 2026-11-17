@@ -65,6 +65,17 @@ def create_app(redeemer: Redeemer, bot) -> web.Application:
     secure = config.PUBLIC_URL.startswith("https://")
     redirect_uri = f"{config.PUBLIC_URL}/auth/callback"
 
+    def rail_servers(me, is_owner) -> list:
+        """Servers for the left rail: ones the bot is in and the user belongs to (access is checked on click)."""
+        if not me:
+            return []
+        member = set((me.get("guilds") or {}).get("member", []))
+        out = []
+        for g in bot.guilds:
+            if is_owner or str(g.id) in member:
+                out.append({"id": str(g.id), "name": g.name, "icon": g.icon.url if g.icon else None})
+        return out
+
     def render(name: str, request=None, **ctx) -> web.Response:
         ctx.setdefault("me", request.get("session") if request else None)
         ctx.setdefault("msg", request.query.get("msg", "") if request else "")
@@ -77,6 +88,7 @@ def create_app(redeemer: Redeemer, bot) -> web.Application:
         ctx["request_path"] = request.path if request else ""
         ctx["heartbeat"] = heartbeat_text()
         ctx["is_owner"] = bool(ctx["me"] and bot.is_owner(int(ctx["me"]["user_id"])))
+        ctx.setdefault("rail", rail_servers(ctx["me"], ctx["is_owner"]))
         ctx["kinds"] = KINDS
         ctx["sections"] = acl.SECTIONS
         ctx["plan_kinds"] = PLAN_KINDS
